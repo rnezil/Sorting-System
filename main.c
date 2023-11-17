@@ -34,6 +34,11 @@ volatile unsigned char ADC_result_lsbs;
 volatile unsigned char ADC_result_flag;
 volatile unsigned char running;
 
+volatile unsigned int plastic = 0;
+volatile unsigned int steel = 0;
+volatile unsigned int alum = 0;
+volatile unsigned char pause_flag = 0;
+
 // Millisecond timer
 void mTimer(int count);
 
@@ -486,7 +491,7 @@ ISR(INT1_vect)
 ISR(INT2_vect){
 	disk_location = 'b';
 	homed_flag = 1;
-	EIMSK = 0x00;	// Disables the INT2 interrupt
+	EIMSK |= _BV(INT0) | _BV(INT1) | _BV(INT3) ;	// Disables the INT2 interrupt
 }
 
 // ISR for ADC Conversion Completion
