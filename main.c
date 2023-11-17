@@ -503,8 +503,7 @@ ISR(ADC_vect)
 ISR(BADISR_vect)
 {
 	LCDClear();
-	while(1){
-		LCDWriteStringXY(1,0, "Something went");
-		LCDWriteStringXY(6,1, "wrong!");
-	}
+	LCDWriteStringXY(1,0, "Something went");
+	LCDWriteStringXY(6,1, "wrong!");
+	while(1);
 }

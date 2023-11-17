@@ -1,0 +1,13 @@
+PART		BOARD			PORT/PIN
+
+LCD Bank	A15(hi) - A6(lo)	PK7:0 PF7:6
+
+Belt PWM		13			PB7
+
+Belt IA
+
+Belt EA
+
+Belt IB
+
+Belt IB
