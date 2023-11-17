@@ -5,7 +5,7 @@
 # GROUP: 2
 # NAME 1: Ryland, Nezil, V00157326
 # NAME 2: Reilly, Reilly, V00894910
-# DESC: Sort items
+# DESC: Sort steel, aluminium, black plastic and white plastic blocks
 # DATA
 # REVISED ############################################*/
 
