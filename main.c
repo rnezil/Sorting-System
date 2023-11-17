@@ -86,10 +86,12 @@ int main(int argc, char* argv[])
 	// Set clock prescaler for timer 1B to 1/8
 	TCCR1B |= _BV(CS11);
 	
-	// Enable external interrupts 0, 1, 2 in falling
-	// edge mode
-	EIMSK |= _BV(INT0) | _BV(INT1) | _BV(INT2);
-	EICRA = 0x2A;
+	// Set INT3 to falling edge mode (ramp down)
+	// Set INT2 to falling edge mode (homing sensor)
+	// Set INT1 to falling edge mode (pause resume)
+	// Set INT0 to any edge mode (kill switch)
+	EIMSK |= _BV(INT0) | _BV(INT1) | _BV(INT2) | _BV(INT3);
+	EICRA = 0xA6;
 	
 	// Enable ADC
 	ADCSRA |= _BV(ADEN);
@@ -194,35 +196,67 @@ void home(){
 		}
 	}
 	LCDWriteStringXY(0,0,"Disk homed Black");	// Can be removed after testing
+//	LCDWriteStringXY(0,1,"Position: ");
+//	LCDWriteIntXY(11,1,position,2);
 	mTimer(1000);
+}
+
+//This function increases and decreases the speed of the stepper motor, slower on startup/direction change
+void stepper_delay(int i, int c, int total){
+	if(i < 14){
+		mTimer(delay[i]);
+	}
+	else if((i > 13) && (i < (c-13))){
+		mTimer(delay[14]);
+	}
+	else if(i >= (c-13)){
+		if(total == 50){			
+			mTimer(delay[(i-22)]);
+		}
+		else{
+			mTimer(delay[(i-72)]);
+		}
+	}
 }
 
 //This function moves the stepper clockwise(0) or counter clockwise(1) 90 degrees or 180 degrees
 void move(int c){
+	int i = 0;
+	int total = c;
 	if (disk_direction == 0){
-		while (c > 0){
+		while(c > 0){
 			PORTA = stepper[position];
-			mTimer(20);
+			stepper_delay(i,c,total);
+			i++;		
 			position++;
-			c--;
+			c--;			
 			if(position == 4){
 				position = 0;
 			}
 			if(c == 0){
+		/*		LCDClear();
+				LCDWriteStringXY(0,1,"Position: ");
+				LCDWriteIntXY(11,1,position,2);				
+				mTimer(2000);*/
 				break;
-			}
+			}			
 		}
 	}
 	if (disk_direction == 1){
 		while (c > 0){
 			PORTA = stepper[position];
-			mTimer(20);
+			stepper_delay(i,c,total);
+			i++;
 			position--;
 			c--;
 			if(position < 0){
 				position = 3;
 			}
 			if(c == 0){
+			/*	LCDClear();
+				LCDWriteStringXY(0,1,"Position: ");
+				LCDWriteIntXY(11,1,position,2);
+				mTimer(2000);*/
 				break;
 			}
 		}
@@ -383,6 +417,32 @@ void print_results(){
 	}
 }
 
+void pause(){
+	if(pause_flag == 2){
+	/*	LCDClear();
+		LCDWriteStringXY(0,0, "S:");
+		LCDWriteIntXY(2,0,steel,2);
+		LCDWriteStringXY(4,0, ", A:");
+		LCDWriteIntXY(8,0,alum,2);
+		LCDWriteStringXY(10,0, ", P:");
+		LCDWriteIntXY(14,0,plastic,2);
+		LCDWriteStringXY(0,1, "Items Sorted: ");
+		LCDWriteIntXY(13,1,items_sorted,2);*/
+		while((PIND & (1<<PIND1)) != (1<<PIND1)){
+			if(pause_flag == 0){
+				break;
+			}
+		}
+	}
+	else if(pause_flag == 4){
+//		LCDWriteStringXY(0,0,"Program resumed");
+//		LCDClear();
+//		LCDWriteIntXY(0,1,pause_flag,1);
+		pause_flag = 0;
+	}
+}
+
+// Ryland ISR's
 /*
 // Killswitch ISR
 ISR(INT0_vect)
@@ -391,7 +451,7 @@ ISR(INT0_vect)
 	PORTL |= 0xF0;
 	while(1);
 }
-*/
+
 
 // Stop conveyor belt ISR
 ISR(INT1_vect)
@@ -414,13 +474,77 @@ ISR(INT1_vect)
 	}
 }
 
-/*
+
 //Stepper homing interrupt
 ISR(INT2_vect){
 	disk_location = 'b';
 	homed_flag = 1;
 	EIMSK = 0x00;	// Disables the INT2 interrupt
+}
+
+// ISR for ADC Conversion Completion
+ISR(ADC_vect)
+{
+	// Get ADC result
+	ADC_result_lsbs = ADCL;
+	ADC_result_msbs = ADCH & 0x03;
+	
+	// Set flag indicating a result has been written
+	ADC_result_flag = 1;
 }*/
+
+// Reilly ISR's
+/*// Killswitch ISR
+ISR(INT0_vect)
+{
+	// Stop motor and wait for reset
+	PORTL |= 0xF0;
+	LCDClear();
+	LCDWriteStringXY(0,0,"Kill Switch Hit");
+	while(1);
+}
+
+
+// Stop conveyor belt ISR
+ISR(INT1_vect)
+{
+	//mTimer(25);
+	while((PIND & (1<<PIND1)) == (1<<PIND1)){
+		mTimer(20);
+	}
+	pause_flag++;	
+	pause();
+//	LCDWriteIntXY(0,0,pause_flag,2);
+
+
+
+
+	// Don't brake low + debounce
+	PORTL |= 0xF0;
+	mTimer(20);
+	
+	if( forwards )
+	{
+		// CW/backwards rotation
+		PORTL &= 0xBF;
+		forwards = 0x00;
+	}
+	else
+	{
+		// CCW/forwards rotation
+		PORTL &= 0x7F;
+		forwards = 0x01;
+	}
+}
+
+
+//Stepper homing interrupt
+ISR(INT2_vect){
+	disk_location = 'b';
+	homed_flag = 1;
+	//EIFR |= _BV(INT2);
+	EIMSK |= _BV(INT0) | _BV(INT1) ;	// Disables the INT2 interrupt
+}
 
 // ISR for ADC Conversion Completion
 ISR(ADC_vect)
@@ -432,3 +556,12 @@ ISR(ADC_vect)
 	// Set flag indicating a result has been written
 	ADC_result_flag = 1;
 }
+
+ISR(BADISR_vect)
+{
+	LCDClear();
+	while(1){
+	LCDWriteStringXY(1,0, "Something went");
+	LCDWriteStringXY(6,1, "wrong!");
+	}
+}*/
