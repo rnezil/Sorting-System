@@ -1,13 +1,49 @@
-PART		BOARD			PORT/PIN
+PART		BOARD		PORT/PIN		INFO
+____________________________________________________________
 
-LCD Bank	A15(hi) - A6(lo)	PK7:0 PF7:6
+LED Bank	A15:A6		PK7:0 PF7:6
 
-Belt PWM		13			PB7
+Belt PWM	13		PB7
 
-Belt IA
+Belt IA		42		PL7
 
-Belt EA
+Belt IB		43		PL6
 
-Belt IB
+Belt EA		44		PL5
 
-Belt IB
+Belt EB		45		PL4
+
+Killswitch	21		PD0			any edge
+
+Pause/Resume	20		PD1			rising edge
+
+Homing Sensor	19		PD2			falling edge
+
+Ramp Down	18		PD3			falling edge
+
+LCD K		GND
+
+LCD A		VDD
+
+LCD D7:D4	34:37		PC3:PC0
+
+LCD E		30		PC7
+
+LCD RW		32		PC5
+
+LCD RS		31		PC6
+
+LCD V0		100Ohm to GND
+
+LCD VDD		VDD
+
+LCD VSS		GND
+
+Stepper E1	22		PA0
+
+Stepper L1:L2	23:24		PA1:PA2
+
+Stepper E2	25		PA3
+
+Stepper L3:L4	26:27		PA4:PA5
+
