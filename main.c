@@ -32,7 +32,7 @@
 volatile unsigned char ADC_result_msbs;
 volatile unsigned char ADC_result_lsbs;
 volatile unsigned char ADC_result_flag;
-volatile unsigned char forwards;
+volatile unsigned char running;
 
 // Millisecond timer
 void mTimer(int count);
@@ -64,7 +64,7 @@ int main(int argc, char* argv[])
 	cli();
 	
 	// Set initial system state
-	forwards = 0x00;
+	running = 0x00;
 		
 	// PWM Out
 	DDRB = 0x80;
@@ -442,59 +442,7 @@ void pause(){
 	}
 }
 
-// Ryland ISR's
-/*
 // Killswitch ISR
-ISR(INT0_vect)
-{
-	// Stop motor and wait for reset
-	PORTL |= 0xF0;
-	while(1);
-}
-
-
-// Stop conveyor belt ISR
-ISR(INT1_vect)
-{
-	// Don't brake low + debounce
-	PORTL |= 0xF0;
-	mTimer(20);
-	
-	if( forwards )
-	{
-		// CW/backwards rotation
-		//PORTL &= 0xBF;
-		forwards = 0x00;
-	}
-	else
-	{
-		// CCW/forwards rotation
-		PORTL &= 0x7F;
-		forwards = 0x01;
-	}
-}
-
-
-//Stepper homing interrupt
-ISR(INT2_vect){
-	disk_location = 'b';
-	homed_flag = 1;
-	EIMSK = 0x00;	// Disables the INT2 interrupt
-}
-
-// ISR for ADC Conversion Completion
-ISR(ADC_vect)
-{
-	// Get ADC result
-	ADC_result_lsbs = ADCL;
-	ADC_result_msbs = ADCH & 0x03;
-	
-	// Set flag indicating a result has been written
-	ADC_result_flag = 1;
-}*/
-
-// Reilly ISR's
-/*// Killswitch ISR
 ISR(INT0_vect)
 {
 	// Stop motor and wait for reset
@@ -504,46 +452,41 @@ ISR(INT0_vect)
 	while(1);
 }
 
-
-// Stop conveyor belt ISR
+// Pause/resume conveyor belt ISR
 ISR(INT1_vect)
 {
 	//mTimer(25);
 	while((PIND & (1<<PIND1)) == (1<<PIND1)){
 		mTimer(20);
 	}
-	pause_flag++;	
+	pause_flag++;
 	pause();
-//	LCDWriteIntXY(0,0,pause_flag,2);
+	LCDWriteIntXY(0,0,pause_flag,2);
 
-
-
-
-	// Don't brake low + debounce
+/*	// Efficient pause/resume (for performance)
+	// Brake high + debounce
 	PORTL |= 0xF0;
-	mTimer(20);
+	mTimer(25);
 	
-	if( forwards )
+	if( running )
 	{
-		// CW/backwards rotation
-		PORTL &= 0xBF;
-		forwards = 0x00;
+		// Pause
+		PORTL &= 0xFF;
+		running = 0x00;
 	}
 	else
 	{
-		// CCW/forwards rotation
+		// Resume
 		PORTL &= 0x7F;
-		forwards = 0x01;
-	}
+		running = 0x01;
+	}*/
 }
 
-
-//Stepper homing interrupt
+// Stepper homing interrupt
 ISR(INT2_vect){
 	disk_location = 'b';
 	homed_flag = 1;
-	//EIFR |= _BV(INT2);
-	EIMSK |= _BV(INT0) | _BV(INT1) ;	// Disables the INT2 interrupt
+	EIMSK = 0x00;	// Disables the INT2 interrupt
 }
 
 // ISR for ADC Conversion Completion
@@ -561,7 +504,7 @@ ISR(BADISR_vect)
 {
 	LCDClear();
 	while(1){
-	LCDWriteStringXY(1,0, "Something went");
-	LCDWriteStringXY(6,1, "wrong!");
+		LCDWriteStringXY(1,0, "Something went");
+		LCDWriteStringXY(6,1, "wrong!");
 	}
-}*/
+}
