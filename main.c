@@ -76,7 +76,7 @@ int main(int argc, char* argv[])
 	
 	// DC Motor
 	DDRL = 0xF0;
-	PORTL |= 0xF0;
+//	PORTL |= 0xF0;
 	
 	// Stepper Motor
 	DDRA = 0xFF;
@@ -95,7 +95,7 @@ int main(int argc, char* argv[])
 	// Set INT2 to falling edge mode (homing sensor)
 	// Set INT1 to falling edge mode (pause resume)
 	// Set INT0 to any edge mode (kill switch)
-	EIMSK |= _BV(INT0) | _BV(INT1) | _BV(INT2) | _BV(INT3);
+	EIMSK |= _BV(INT0) | _BV(INT1) | _BV(INT2);// | _BV(INT3);
 	EICRA = 0xA6;
 	
 	// Enable ADC
@@ -130,30 +130,30 @@ int main(int argc, char* argv[])
 	// Initialize ADC, start one conversion at the
 	// beginning
 	ADCSRA |= _BV(ADSC);
-	/*
+	
 	// Can be removed after testing
 	char list[] = {'a','b','s','w','w','a','s','b','w','s','b'};
 	LCDWriteStringXY(0,0,"Disk is homing");
-	home();*/
+	home();
 	
 	while(1)
 	{	
 		// 10-bit ADC test with LEDs
-		if(ADC_result_flag)
+		/*if(ADC_result_flag)
 		{
 			PORTK = (ADC_result_msbs << 6) | (ADC_result_lsbs >> 2);
 			PORTF = ADC_result_lsbs << 6;
 			ADC_result_flag = 0x00;
 		}
 		
-		/*
+		*/
 		// This for loop will be replaced with iteration through a linked list
 		for(int i = 0; i < 11; i++){
 			sort(list[i]);
 			LCDClear();
 			print_results();
-			mTimer(2000);
-		}*/
+			mTimer(1000);
+		}
 		items_sorted = 0;
 	}
 	
@@ -206,23 +206,6 @@ void home(){
 	mTimer(1000);
 }
 
-//This function increases and decreases the speed of the stepper motor, slower on startup/direction change
-void stepper_delay(int i, int c, int total){
-	if(i < 14){
-		mTimer(delay[i]);
-	}
-	else if((i > 13) && (i < (c-13))){
-		mTimer(delay[14]);
-	}
-	else if(i >= (c-13)){
-		if(total == 50){			
-			mTimer(delay[(i-22)]);
-		}
-		else{
-			mTimer(delay[(i-72)]);
-		}
-	}
-}
 
 //This function moves the stepper clockwise(0) or counter clockwise(1) 90 degrees or 180 degrees
 void move(int c){
@@ -231,7 +214,10 @@ void move(int c){
 	if (disk_direction == 0){
 		while(c > 0){
 			PORTA = stepper[position];
-			stepper_delay(i,c,total);
+			if(total == 90){
+				mTimer(delay_a[i]);
+			}
+			else{mTimer(delay_b[i]);}
 			i++;		
 			position++;
 			c--;			
@@ -250,7 +236,10 @@ void move(int c){
 	if (disk_direction == 1){
 		while (c > 0){
 			PORTA = stepper[position];
-			stepper_delay(i,c,total);
+			if(total == 90){
+				mTimer(delay_a[i]);
+			}
+			else{mTimer(delay_b[i]);}
 			i++;
 			position--;
 			c--;
@@ -424,7 +413,7 @@ void print_results(){
 
 void pause(){
 	if(pause_flag == 2){
-	/*	LCDClear();
+		LCDClear();
 		LCDWriteStringXY(0,0, "S:");
 		LCDWriteIntXY(2,0,steel,2);
 		LCDWriteStringXY(4,0, ", A:");
@@ -432,7 +421,7 @@ void pause(){
 		LCDWriteStringXY(10,0, ", P:");
 		LCDWriteIntXY(14,0,plastic,2);
 		LCDWriteStringXY(0,1, "Items Sorted: ");
-		LCDWriteIntXY(13,1,items_sorted,2);*/
+		LCDWriteIntXY(13,1,items_sorted,2);
 		while((PIND & (1<<PIND1)) != (1<<PIND1)){
 			if(pause_flag == 0){
 				break;
@@ -466,7 +455,7 @@ ISR(INT1_vect)
 	}
 	pause_flag++;
 	pause();
-	LCDWriteIntXY(0,0,pause_flag,2);
+//	LCDWriteIntXY(0,0,pause_flag,2);
 
 /*	// Efficient pause/resume (for performance)
 	// Brake high + debounce
