@@ -17,7 +17,7 @@ void move(int c);
 void sort(char list_item);
 void print_results();
 void pause();
-void stepper_delay(int i, int c, int total);
+
 
 // Global variables for stepper control
 volatile char disk_location;	// Black, White, Steel, Aluminum

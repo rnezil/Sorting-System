@@ -141,6 +141,11 @@ int main(int argc, char* argv[])
 		// 10-bit ADC test with LEDs
 		/*if(ADC_result_flag)
 		{
+			ADC_result = ADC_result_msb & ADC_result_lbs;
+			//some function to determine what the item is needed here
+			initLink(&newLink);
+			newLink->e.itemColour = ADC_result;
+			enqueue(&head, &tail, &newLink);
 			PORTK = (ADC_result_msbs << 6) | (ADC_result_lsbs >> 2);
 			PORTF = ADC_result_lsbs << 6;
 			ADC_result_flag = 0x00;

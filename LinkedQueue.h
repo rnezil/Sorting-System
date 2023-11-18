@@ -1,6 +1,6 @@
 typedef struct {
-	char itemCode; 	/* stores a number describing the element */
-	char stage; 	/* 0: part is built, 1: part not built, 2: part is shipped */
+	char itemColor; 	/* stores a letter indicating if the item is Black/White/Steel/Aluminum*/
+	char stage; 		/* 0: part is built, 1: part not built, 2: part is shipped */
 } element;
 
 typedef struct link{
