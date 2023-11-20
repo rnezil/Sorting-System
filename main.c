@@ -1,4 +1,4 @@
-/* ###################################################
+/* ##################################################
 # MILESTONE: 5
 # PROGRAM: 1
 # PROJECT: Conveyor Belt Demo
@@ -9,12 +9,23 @@
 # DATA
 # REVISED ############################################*/
 
+#ifndef SENSORVALUES
+#define SENSORVALUES
+
+#define FERROMAGNETIC_NO_ITEM_VALUE	123
+#define REFLECTIVE_NO_ITEM_VALUE	123
+#define METALLIC_THRESHOLD		123	// Above->plastic, below->metal
+#define METAL_REFLECTIVE_THRESHOLD	300	// Above->steel, below->aluminium
+#define PLASTIC_REFLECTIVE_THRESHOLD	1000	// Above->black, below->white
+
+#endif
+
 #include <avr/interrupt.h>
 #include <avr/io.h>
 #include <stdlib.h>
 #include "lcd.h"
 #include "stepper.h"
-//#include "LinkedQueue.h"
+#include "LinkedQueue.h"
 
 // Note: interrupts have priority. INT0 is top priority
 // external interrupt, INT7 is lowest priority external
@@ -29,9 +40,7 @@
 
 // Need to use global variables because you cannot
 // define a variable within an ISR
-volatile unsigned char ADC_result_msbs;
-volatile unsigned char ADC_result_lsbs;
-volatile unsigned char ADC_result_flag;
+volatile unsigned int ADC_result;
 volatile unsigned char running;
 
 volatile unsigned int plastic = 0;
@@ -54,16 +63,12 @@ int main(int argc, char* argv[])
 	// Clear the screen
 	LCDClear();
 
-	/*	FIFO QUEUE	*/
-	
-	/*
 	// Prepare the queue
 	link* head;
 	link* tail;
-	link* temp;
-	char qData;
+	link* newItem;
+	link* oldItem;
 	setup(&head, &tail);
-	*/
 	
 	// Enter uninterruptable command system
 	cli();
@@ -76,7 +81,7 @@ int main(int argc, char* argv[])
 	
 	// DC Motor
 	DDRL = 0xF0;
-//	PORTL |= 0xF0;
+	PORTL |= 0xF0;
 	
 	// Stepper Motor
 	DDRA = 0xFF;
@@ -135,6 +140,10 @@ int main(int argc, char* argv[])
 	char list[] = {'a','b','s','w','w','a','s','b','w','s','b'};
 	LCDWriteStringXY(0,0,"Disk is homing");
 	home();
+
+	// Sensor values for current item
+	unsigned ferromagnetic_value;
+	unsigned reflective_value;
 	
 	while(1)
 	{	
@@ -149,9 +158,71 @@ int main(int argc, char* argv[])
 			PORTK = (ADC_result_msbs << 6) | (ADC_result_lsbs >> 2);
 			PORTF = ADC_result_lsbs << 6;
 			ADC_result_flag = 0x00;
+		}*/
+
+		if( ((ADMUX & _BV(MUX0)) && (ADC_result < FERROMAGNETIC_NO_ITEM_VALUE))
+				|| ((ADMUX & _BV(MUX0) ^ _BV(MUX0)) && (ADC_result < REFLECTIVE_NO_ITEM_VALUE)) )
+		{
+			// Initialize new item to be queued
+			initLink(&newItem);
+
+			// Reset sensor values
+			ferromagnetic_value = FERROMAGNETIC_NO_ITEM_VALUE;
+			reflective_value = REFLECTIVE_NO_ITEM_VALUE;
+
+			// Delay to work around sensor value deviations causing the while loop
+			// below to end prematurely
+			mTimer(10);
+
+			while( ((ADMUX & _BV(MUX0)) && (ADC_result < FERROMAGNETIC_NO_ITEM_VALUE))
+				|| ((ADMUX & _BV(MUX0) ^ _BV(MUX0)) && (ADC_result < REFLECTIVE_NO_ITEM_VALUE)) )
+			{
+				if(ADMUX & _BV(MUX0))
+				{
+					// Ferromagnetic value
+					if(ADC_result > ferromagnetic_value) ferromagnetic_value = ADC_result;
+				}
+				else
+				{
+					// Reflective value
+					if(ADC_result > reflective_value) reflective_value = ADC_result;
+				}
+			}
+
+			// Determine what item type is and add to queue
+			if(ferromagnetic_value < METALLIC_THRESHOLD)
+			{
+				// Item is metal
+				if(reflective_value < METAL_REFLECTIVITY_THRESHOLD)
+				{
+					// Item is aluminium
+					newItem->i = 'a';
+				}
+				else
+				{
+					// Item is steel
+					newItem->i = 's';
+				}
+			}
+			else
+			{
+				// Item is plastic
+				if(reflective_value < PLASTIC_REFLECTIVITY_THRESHOLD)
+				{
+					// Item is white plastic
+					newItem->i = 'w';
+				}
+				else
+				{
+					// Item is black plastic
+					newItem->i = 'b';
+				}
+			}
+
+			// Add new item to queue
+			enqueue(&head, &tail, &newItem);
 		}
-		
-		*/
+
 		// This for loop will be replaced with iteration through a linked list
 		for(int i = 0; i < 11; i++){
 			sort(list[i]);
@@ -441,6 +512,109 @@ void pause(){
 	}
 }
 
+void setup(link **h,link **t)
+{
+	*h = NULL;		/* Point the head to NOTHING (NULL) */
+	*t = NULL;		/* Point the tail to NOTHING (NULL) */
+	return;
+}
+
+void initLink(link **newLink)
+{
+	//link *l;
+	*newLink = malloc(sizeof(link));
+	(*newLink)->next = NULL;
+	return;
+}
+
+void destroyLink (link **oldLink)
+{
+	if(*oldLink != NULL)
+	{
+		(*deadLink)->next = NULL;
+		free(*oldLink);
+	}
+	
+	return;
+}
+
+void enqueue(link **h, link **t, link **nL)
+{
+
+	if (*t != NULL){
+		/* Not an empty queue */
+		(*t)->next = *nL;
+		*t = *nL; //(*t)->next;
+	}/*if*/
+	else{
+		/* It's an empty Queue */
+		//(*h)->next = *nL;
+		//should be this
+		*h = *nL;
+		*t = *nL;
+	}/* else */
+	
+	// Ensure queue is null terminated
+	(*nL)->next = NULL;
+	
+	return;
+}
+
+void dequeue(link **h, link **deQueuedLink)
+{
+	*deQueuedLink = *h;	// Will set to NULL if Head points to NULL
+	// Is it desirable for dequeue to nullify the ->next pointer?
+	/* Ensure it is not an empty queue */
+	if (*h != NULL){
+		*h = (*h)->next;
+	}/*if*/
+	
+	return;
+}
+
+element firstValue(link **h)
+{
+	return((*h)->i);
+}
+
+void clearQueue(link **h, link **t)
+{
+
+	link *temp;
+
+	while (*h != NULL){
+		temp = *h;
+		*h=(*h)->next;
+		free(temp);
+	}/*while*/
+	
+	/* Last but not least set the tail to NULL */
+	*t = NULL;		
+
+	return;
+}
+
+char isEmpty(link **h)
+{
+	return(*h == NULL);
+}
+
+int size(link **h, link **t){
+
+	link 	*temp;			/* will store the link while traversing the queue */
+	int 	numItems;
+
+	numItems = 0;
+
+	temp = *h;			/* point to the first item in the list */
+
+	while(temp != NULL){
+		numItems++;
+		temp = temp->next;
+	}/*while*/	
+	return(numItems);
+}
+
 // Killswitch ISR
 ISR(INT0_vect)
 {
@@ -492,11 +666,21 @@ ISR(INT2_vect){
 ISR(ADC_vect)
 {
 	// Get ADC result
-	ADC_result_lsbs = ADCL;
-	ADC_result_msbs = ADCH & 0x03;
-	
-	// Set flag indicating a result has been written
-	ADC_result_flag = 1;
+	ADC_result = 0x00;
+	ADC_result |= ADCL;
+	ADC_result |= (ADCH & 0x03) << 8;
+
+	// Change ADC input channel
+	if( ADMUX & _BV(MUX0) )
+	{
+		// Select ferromagnetic input for next conversion
+		ADMUX &= !_BV(MUX0);
+	}
+	else
+	{
+		// Select reflective input for next conversion
+		ADMUX |= _BV(MUX0);
+	}
 }
 
 ISR(BADISR_vect)
@@ -506,3 +690,4 @@ ISR(BADISR_vect)
 	LCDWriteStringXY(6,1, "wrong!");
 	while(1);
 }
+

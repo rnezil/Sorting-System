@@ -1,15 +1,18 @@
-typedef struct {
-	char itemColor; 	/* stores a letter indicating if the item is Black/White/Steel/Aluminum*/
-	char stage; 		/* 0: part is built, 1: part not built, 2: part is shipped */
-} element;
+/*
+ * 's' == steel
+ * 'a' == aluminium
+ * 'b' == black plastic
+ * 'w' == white plastic
+ */
+typedef char Item;
 
 typedef struct link{
-	element		e;
+	Item i;
 	struct link *next;
 } link;
 
 void	initLink	(link **newLink); // Allocates fresh memory and nullifies next pointer
-void	destroyLink	(link **deadLink);
+void	destroyLink	(link **oldLink);
 void 	setup		(link **h, link **t);
 void 	clearQueue	(link **h, link **t);
 void 	enqueue		(link **h, link **t, link **nL);
