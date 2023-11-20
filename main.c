@@ -550,7 +550,7 @@ void destroyLink (link **oldLink)
 {
 	if(*oldLink != NULL)
 	{
-		(*deadLink)->next = NULL;
+		(*oldLink)->next = NULL;
 		free(*oldLink);
 	}
 	
@@ -697,10 +697,10 @@ ISR(INT4_vect)
 	sort(firstValue(&head));
 
 	// Remove the item from the queue
-	dequeue(&head, &oldLink);
+	dequeue(&head, &oldItem);
 
 	// Deallocate item
-	destroyLink(&oldLink);
+	destroyLink(&oldItem);
 
 	// Resume the belt
 	PORTL &= 0x7F;
