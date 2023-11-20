@@ -38,11 +38,16 @@
 // could have INT1 INT2 and INT3 all pending at the same
 // time while INT0 is being serviced.
 
-// Need to use global variables because you cannot
-// define a variable within an ISR
+// Variable for storing ADC conversion result
 volatile unsigned int ADC_result;
+
+// Indicates whether conveyor belt is running
 volatile unsigned char running;
 
+// Indicates whether system is in ramp-down mode
+char ramp_down = 0x00;
+
+// (description)
 volatile unsigned int plastic = 0;
 volatile unsigned int steel = 0;
 volatile unsigned int alum = 0;
@@ -73,7 +78,7 @@ int main(int argc, char* argv[])
 	link* newItem;
 	setup(&head, &tail);
 	
-	// Enter uninterruptable command system
+	// Enter uninterruptable command sequence
 	cli();
 	
 	// Set initial system state
@@ -150,6 +155,18 @@ int main(int argc, char* argv[])
 	
 	while(1)
 	{	
+		// If ramp-down mode is active, wait for currently enqueued items to
+		// be processed then exit
+		if(ramp_down)
+		{
+			LCDClear();
+			LCDWriteStringXY(0,0,"Ramping down...");
+			while(!isEmpty(&head));
+			LCDWriteStringXY(0,1,"complete.");
+			return(0);
+		}
+
+		// Wait until sensors detect an item
 		if( ((ADMUX & _BV(MUX0)) && (ADC_result < FERROMAGNETIC_NO_ITEM_THRESHOLD))
 				|| ((ADMUX & _BV(MUX0) ^ _BV(MUX0)) && (ADC_result < REFLECTIVE_NO_ITEM_THRESHOLD)) )
 		{
@@ -564,10 +581,10 @@ void enqueue(link **h, link **t, link **nL)
 
 void dequeue(link **h, link **deQueuedLink)
 {
-	*deQueuedLink = *h;	// Will set to NULL if Head points to NULL
-	// Is it desirable for dequeue to nullify the ->next pointer?
+	*deQueuedLink = *h;
 	/* Ensure it is not an empty queue */
-	if (*h != NULL){
+	if (*h != NULL)
+	{
 		*h = (*h)->next;
 	}/*if*/
 	
@@ -662,6 +679,12 @@ ISR(INT2_vect)
 	disk_location = 'b';
 	homed_flag = 1;
 	EIMSK |= _BV(INT0) | _BV(INT1) | _BV(INT3) ;	// Disables the INT2 interrupt
+}
+
+// Ramp down interrupt
+ISR(INT3_vect)
+{
+	ramp_down = 0x01;
 }
 
 // End of conveyor belt interrupt
