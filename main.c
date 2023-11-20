@@ -47,6 +47,12 @@ volatile unsigned int plastic = 0;
 volatile unsigned int steel = 0;
 volatile unsigned int alum = 0;
 volatile unsigned char pause_flag = 0;
+	
+// Make queue head and tail global so that it can be
+// accessed by ISR's
+volatile link* head;
+volatile link* tail;
+volatile link* oldItem;
 
 // Millisecond timer
 void mTimer(int count);
@@ -64,10 +70,7 @@ int main(int argc, char* argv[])
 	LCDClear();
 
 	// Prepare the queue
-	link* head;
-	link* tail;
 	link* newItem;
-	link* oldItem;
 	setup(&head, &tail);
 	
 	// Enter uninterruptable command system
@@ -96,12 +99,14 @@ int main(int argc, char* argv[])
 	// Set clock prescaler for timer 1B to 1/8
 	TCCR1B |= _BV(CS11);
 	
+	// Set INT4 to falling edge mode (item at end of belt)
 	// Set INT3 to falling edge mode (ramp down)
 	// Set INT2 to falling edge mode (homing sensor)
-	// Set INT1 to falling edge mode (pause resume)
+	// Set INT1 to rising edge mode (pause resume)
 	// Set INT0 to any edge mode (kill switch)
-	EIMSK |= _BV(INT0) | _BV(INT1) | _BV(INT2);// | _BV(INT3);
-	EICRA = 0xA6;
+	EICRA |= _BV(ISC00) | _BV(ISC10) | _BV(ISC11) | _BV(ISC21) | _BV(ISC31);
+	EICRB |= _BV(ISC41);
+	EIMSK |= _BV(INT0) | _BV(INT1) | _BV(INT2) | _BV(INT3) | _BV(INT4);
 	
 	// Enable ADC
 	ADCSRA |= _BV(ADEN);
@@ -137,7 +142,6 @@ int main(int argc, char* argv[])
 	ADCSRA |= _BV(ADSC);
 	
 	// Home the stepper
-	LCDWriteStringXY(0,0,"Disk is homing");
 	home();
 
 	// Sensor values for current item
@@ -182,12 +186,12 @@ int main(int argc, char* argv[])
 				if(reflective_value < METAL_REFLECTIVITY_THRESHOLD)
 				{
 					// Item is aluminium
-					newItem->i = 'a';
+					newItem->itemType = 'a';
 				}
 				else
 				{
 					// Item is steel
-					newItem->i = 's';
+					newItem->itemType = 's';
 				}
 			}
 			else
@@ -196,12 +200,12 @@ int main(int argc, char* argv[])
 				if(reflective_value < PLASTIC_REFLECTIVITY_THRESHOLD)
 				{
 					// Item is white plastic
-					newItem->i = 'w';
+					newItem->itemType = 'w';
 				}
 				else
 				{
 					// Item is black plastic
-					newItem->i = 'b';
+					newItem->itemType = 'b';
 				}
 			}
 
@@ -210,7 +214,7 @@ int main(int argc, char* argv[])
 
 			// Print item to LCD
 			LCDClear();
-			switch(newItem->i)
+			switch(newItem->itemType)
 			{
 				case 's':
 					LCDWriteStringXY(0,0,"Steel");
@@ -332,12 +336,12 @@ void move(int c){
 }
 
 // This function moves the sorting bucket to a location based on part in list
-void sort(char list_item)
+void sort(char item)
 {
 	switch(disk_location)
 	{
 		case 'b':
-		switch(list_item)
+		switch(item)
 		{
 			case 'b':
 			break;
@@ -366,7 +370,7 @@ void sort(char list_item)
 		break;
 		
 		case 'a':
-		switch(list_item)
+		switch(item)
 		{
 			case 'a':
 			break;
@@ -395,7 +399,7 @@ void sort(char list_item)
 		break;
 		
 		case 'w':
-		switch(list_item)
+		switch(item)
 		{
 			case 'w':
 			break;
@@ -424,7 +428,7 @@ void sort(char list_item)
 		break;
 		
 		case 's':
-		switch(list_item)
+		switch(item)
 		{
 			case 's':
 			break;
@@ -570,14 +574,13 @@ void dequeue(link **h, link **deQueuedLink)
 	return;
 }
 
-element firstValue(link **h)
+char firstValue(link **h)
 {
-	return((*h)->i);
+	return((*h)->itemType);
 }
 
 void clearQueue(link **h, link **t)
 {
-
 	link *temp;
 
 	while (*h != NULL){
@@ -654,11 +657,32 @@ ISR(INT1_vect)
 }
 
 // Stepper homing interrupt
-ISR(INT2_vect){
+ISR(INT2_vect)
+{
 	disk_location = 'b';
 	homed_flag = 1;
 	EIMSK |= _BV(INT0) | _BV(INT1) | _BV(INT3) ;	// Disables the INT2 interrupt
 }
+
+// End of conveyor belt interrupt
+ISR(INT4_vect)
+{
+	// Stop the belt
+	PORTL &= 0xFF;
+
+	// Move the stepper dish
+	sort(firstValue(&head));
+
+	// Remove the item from the queue
+	dequeue(&head, &oldLink);
+
+	// Deallocate item
+	destroyLink(&oldLink);
+
+	// Resume the belt
+	PORTL &= 0x7F;
+}
+	
 
 // ISR for ADC Conversion Completion
 ISR(ADC_vect)
