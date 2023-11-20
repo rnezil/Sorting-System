@@ -136,8 +136,7 @@ int main(int argc, char* argv[])
 	// beginning
 	ADCSRA |= _BV(ADSC);
 	
-	// Can be removed after testing
-	char list[] = {'a','b','s','w','w','a','s','b','w','s','b'};
+	// Home the stepper
 	LCDWriteStringXY(0,0,"Disk is homing");
 	home();
 
@@ -147,19 +146,6 @@ int main(int argc, char* argv[])
 	
 	while(1)
 	{	
-		// 10-bit ADC test with LEDs
-		/*if(ADC_result_flag)
-		{
-			ADC_result = ADC_result_msb & ADC_result_lbs;
-			//some function to determine what the item is needed here
-			initLink(&newLink);
-			newLink->e.itemColour = ADC_result;
-			enqueue(&head, &tail, &newLink);
-			PORTK = (ADC_result_msbs << 6) | (ADC_result_lsbs >> 2);
-			PORTF = ADC_result_lsbs << 6;
-			ADC_result_flag = 0x00;
-		}*/
-
 		if( ((ADMUX & _BV(MUX0)) && (ADC_result < FERROMAGNETIC_NO_ITEM_THRESHOLD))
 				|| ((ADMUX & _BV(MUX0) ^ _BV(MUX0)) && (ADC_result < REFLECTIVE_NO_ITEM_THRESHOLD)) )
 		{
@@ -221,16 +207,28 @@ int main(int argc, char* argv[])
 
 			// Add new item to queue
 			enqueue(&head, &tail, &newItem);
-		}
 
-		// This for loop will be replaced with iteration through a linked list
-		for(int i = 0; i < 11; i++){
-			sort(list[i]);
+			// Print item to LCD
 			LCDClear();
-			print_results();
-			mTimer(1000);
+			switch(newItem->i)
+			{
+				case 's':
+					LCDWriteStringXY(0,0,"Steel");
+					break;
+				case 'a':
+					LCDWriteStringXY(0,0,"Aluminium");
+					break;
+				case 'b':
+					LCDWriteStringXY(0,0,"Black Plastic");
+					break;
+				case 'w':
+					LCDWriteStringXY(0,0,"White Plastic");
+					break;
+				default:
+					LCDWriteStringXY(0,0,"Scanning Error");
+					break;
+			}
 		}
-		items_sorted = 0;
 	}
 	
 	return(0);
