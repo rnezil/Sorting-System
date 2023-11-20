@@ -1,4 +1,4 @@
-/* ###################################################
+/* ##################################################
 # MILESTONE: 5
 # PROGRAM: 1
 # PROJECT: Conveyor Belt Demo
@@ -9,12 +9,23 @@
 # DATA
 # REVISED ############################################*/
 
+#ifndef SENSOR_THRESHOLD_VALUES
+#define SENSOR_THRESHOLD_VALUES
+
+#define FERROMAGNETIC_NO_ITEM_THRESHOLD	123
+#define REFLECTIVE_NO_ITEM_THRESHOLD	123
+#define METALLIC_THRESHOLD		123	// Above->plastic, below->metal
+#define METAL_REFLECTIVITY_THRESHOLD	300	// Above->steel, below->aluminium
+#define PLASTIC_REFLECTIVITY_THRESHOLD	1000	// Above->black, below->white
+
+#endif
+
 #include <avr/interrupt.h>
 #include <avr/io.h>
 #include <stdlib.h>
 #include "lcd.h"
 #include "stepper.h"
-//#include "LinkedQueue.h"
+#include "LinkedQueue.h"
 
 // Note: interrupts have priority. INT0 is top priority
 // external interrupt, INT7 is lowest priority external
@@ -27,17 +38,26 @@
 // could have INT1 INT2 and INT3 all pending at the same
 // time while INT0 is being serviced.
 
-// Need to use global variables because you cannot
-// define a variable within an ISR
-volatile unsigned char ADC_result_msbs;
-volatile unsigned char ADC_result_lsbs;
-volatile unsigned char ADC_result_flag;
+// Variable for storing ADC conversion result
+volatile unsigned int ADC_result;
+
+// Indicates whether conveyor belt is running
 volatile unsigned char running;
 
+// Indicates whether system is in ramp-down mode
+char ramp_down = 0x00;
+
+// (description)
 volatile unsigned int plastic = 0;
 volatile unsigned int steel = 0;
 volatile unsigned int alum = 0;
 volatile unsigned char pause_flag = 0;
+	
+// Make queue head and tail global so that it can be
+// accessed by ISR's
+volatile link* head;
+volatile link* tail;
+volatile link* oldItem;
 
 // Millisecond timer
 void mTimer(int count);
@@ -54,18 +74,11 @@ int main(int argc, char* argv[])
 	// Clear the screen
 	LCDClear();
 
-	/*	FIFO QUEUE	*/
-	
-	/*
 	// Prepare the queue
-	link* head;
-	link* tail;
-	link* temp;
-	char qData;
+	link* newItem;
 	setup(&head, &tail);
-	*/
 	
-	// Enter uninterruptable command system
+	// Enter uninterruptable command sequence
 	cli();
 	
 	// Set initial system state
@@ -91,12 +104,14 @@ int main(int argc, char* argv[])
 	// Set clock prescaler for timer 1B to 1/8
 	TCCR1B |= _BV(CS11);
 	
+	// Set INT4 to falling edge mode (item at end of belt)
 	// Set INT3 to falling edge mode (ramp down)
 	// Set INT2 to falling edge mode (homing sensor)
 	// Set INT1 to rising edge mode (pause resume)
 	// Set INT0 to any edge mode (kill switch)
-	EIMSK |= _BV(INT0) | _BV(INT1) | _BV(INT2) | _BV(INT3);
-	EICRA = 0xA6;
+	EICRA |= _BV(ISC00) | _BV(ISC10) | _BV(ISC11) | _BV(ISC21) | _BV(ISC31);
+	EICRB |= _BV(ISC41);
+	EIMSK |= _BV(INT0) | _BV(INT1) | _BV(INT2) | _BV(INT3) | _BV(INT4);
 	
 	// Enable ADC
 	ADCSRA |= _BV(ADEN);
@@ -130,31 +145,111 @@ int main(int argc, char* argv[])
 	// Initialize ADC, start one conversion at the
 	// beginning
 	ADCSRA |= _BV(ADSC);
-	/*
-	// Can be removed after testing
-	char list[] = {'a','b','s','w','w','a','s','b','w','s','b'};
-	LCDWriteStringXY(0,0,"Disk is homing");
-	home();*/
+	
+	// Home the stepper
+	home();
+
+	// Sensor values for current item
+	unsigned ferromagnetic_value;
+	unsigned reflective_value;
 	
 	while(1)
 	{	
-		// 10-bit ADC test with LEDs
-		if(ADC_result_flag)
+		// If ramp-down mode is active, wait for currently enqueued items to
+		// be processed then exit
+		if(ramp_down)
 		{
-			PORTK = (ADC_result_msbs << 6) | (ADC_result_lsbs >> 2);
-			PORTF = ADC_result_lsbs << 6;
-			ADC_result_flag = 0x00;
-		}
-		
-		/*
-		// This for loop will be replaced with iteration through a linked list
-		for(int i = 0; i < 11; i++){
-			sort(list[i]);
 			LCDClear();
-			print_results();
-			mTimer(2000);
-		}*/
-		items_sorted = 0;
+			LCDWriteStringXY(0,0,"Ramping down...");
+			while(!isEmpty(&head));
+			LCDWriteStringXY(0,1,"complete.");
+			return(0);
+		}
+
+		// Wait until sensors detect an item
+		if( ((ADMUX & _BV(MUX0)) && (ADC_result < FERROMAGNETIC_NO_ITEM_THRESHOLD))
+				|| ((ADMUX & _BV(MUX0) ^ _BV(MUX0)) && (ADC_result < REFLECTIVE_NO_ITEM_THRESHOLD)) )
+		{
+			// Initialize new item to be queued
+			initLink(&newItem);
+
+			// Reset sensor values
+			ferromagnetic_value = FERROMAGNETIC_NO_ITEM_THRESHOLD;
+			reflective_value = REFLECTIVE_NO_ITEM_THRESHOLD;
+
+			// Delay to work around sensor value deviations causing the while loop
+			// below to end prematurely
+			mTimer(10);
+
+			while( ((ADMUX & _BV(MUX0)) && (ADC_result < FERROMAGNETIC_NO_ITEM_THRESHOLD))
+				|| ((ADMUX & _BV(MUX0) ^ _BV(MUX0)) && (ADC_result < REFLECTIVE_NO_ITEM_THRESHOLD)) )
+			{
+				if(ADMUX & _BV(MUX0))
+				{
+					// Ferromagnetic value
+					if(ADC_result < ferromagnetic_value) ferromagnetic_value = ADC_result;
+				}
+				else
+				{
+					// Reflective value
+					if(ADC_result < reflective_value) reflective_value = ADC_result;
+				}
+			}
+
+			// Determine what item type is and add to queue
+			if(ferromagnetic_value < METALLIC_THRESHOLD)
+			{
+				// Item is metal
+				if(reflective_value < METAL_REFLECTIVITY_THRESHOLD)
+				{
+					// Item is aluminium
+					newItem->itemType = 'a';
+				}
+				else
+				{
+					// Item is steel
+					newItem->itemType = 's';
+				}
+			}
+			else
+			{
+				// Item is plastic
+				if(reflective_value < PLASTIC_REFLECTIVITY_THRESHOLD)
+				{
+					// Item is white plastic
+					newItem->itemType = 'w';
+				}
+				else
+				{
+					// Item is black plastic
+					newItem->itemType = 'b';
+				}
+			}
+
+			// Add new item to queue
+			enqueue(&head, &tail, &newItem);
+
+			// Print item to LCD
+			LCDClear();
+			switch(newItem->itemType)
+			{
+				case 's':
+					LCDWriteStringXY(0,0,"Steel");
+					break;
+				case 'a':
+					LCDWriteStringXY(0,0,"Aluminium");
+					break;
+				case 'b':
+					LCDWriteStringXY(0,0,"Black Plastic");
+					break;
+				case 'w':
+					LCDWriteStringXY(0,0,"White Plastic");
+					break;
+				default:
+					LCDWriteStringXY(0,0,"Scanning Error");
+					break;
+			}
+		}
 	}
 	
 	return(0);
@@ -206,23 +301,6 @@ void home(){
 	mTimer(1000);
 }
 
-//This function increases and decreases the speed of the stepper motor, slower on startup/direction change
-void stepper_delay(int i, int c, int total){
-	if(i < 14){
-		mTimer(delay[i]);
-	}
-	else if((i > 13) && (i < (c-13))){
-		mTimer(delay[14]);
-	}
-	else if(i >= (c-13)){
-		if(total == 50){			
-			mTimer(delay[(i-22)]);
-		}
-		else{
-			mTimer(delay[(i-72)]);
-		}
-	}
-}
 
 //This function moves the stepper clockwise(0) or counter clockwise(1) 90 degrees or 180 degrees
 void move(int c){
@@ -231,7 +309,10 @@ void move(int c){
 	if (disk_direction == 0){
 		while(c > 0){
 			PORTA = stepper[position];
-			stepper_delay(i,c,total);
+			if(total == 90){
+				mTimer(delay_a[i]);
+			}
+			else{mTimer(delay_b[i]);}
 			i++;		
 			position++;
 			c--;			
@@ -250,7 +331,10 @@ void move(int c){
 	if (disk_direction == 1){
 		while (c > 0){
 			PORTA = stepper[position];
-			stepper_delay(i,c,total);
+			if(total == 90){
+				mTimer(delay_a[i]);
+			}
+			else{mTimer(delay_b[i]);}
 			i++;
 			position--;
 			c--;
@@ -269,12 +353,12 @@ void move(int c){
 }
 
 // This function moves the sorting bucket to a location based on part in list
-void sort(char list_item)
+void sort(char item)
 {
 	switch(disk_location)
 	{
 		case 'b':
-		switch(list_item)
+		switch(item)
 		{
 			case 'b':
 			break;
@@ -303,7 +387,7 @@ void sort(char list_item)
 		break;
 		
 		case 'a':
-		switch(list_item)
+		switch(item)
 		{
 			case 'a':
 			break;
@@ -332,7 +416,7 @@ void sort(char list_item)
 		break;
 		
 		case 'w':
-		switch(list_item)
+		switch(item)
 		{
 			case 'w':
 			break;
@@ -361,7 +445,7 @@ void sort(char list_item)
 		break;
 		
 		case 's':
-		switch(list_item)
+		switch(item)
 		{
 			case 's':
 			break;
@@ -424,7 +508,7 @@ void print_results(){
 
 void pause(){
 	if(pause_flag == 2){
-	/*	LCDClear();
+		LCDClear();
 		LCDWriteStringXY(0,0, "S:");
 		LCDWriteIntXY(2,0,steel,2);
 		LCDWriteStringXY(4,0, ", A:");
@@ -432,7 +516,7 @@ void pause(){
 		LCDWriteStringXY(10,0, ", P:");
 		LCDWriteIntXY(14,0,plastic,2);
 		LCDWriteStringXY(0,1, "Items Sorted: ");
-		LCDWriteIntXY(13,1,items_sorted,2);*/
+		LCDWriteIntXY(13,1,items_sorted,2);
 		while((PIND & (1<<PIND1)) != (1<<PIND1)){
 			if(pause_flag == 0){
 				break;
@@ -445,6 +529,108 @@ void pause(){
 //		LCDWriteIntXY(0,1,pause_flag,1);
 		pause_flag = 0;
 	}
+}
+
+void setup(link **h,link **t)
+{
+	*h = NULL;		/* Point the head to NOTHING (NULL) */
+	*t = NULL;		/* Point the tail to NOTHING (NULL) */
+	return;
+}
+
+void initLink(link **newLink)
+{
+	//link *l;
+	*newLink = malloc(sizeof(link));
+	(*newLink)->next = NULL;
+	return;
+}
+
+void destroyLink (link **oldLink)
+{
+	if(*oldLink != NULL)
+	{
+		(*deadLink)->next = NULL;
+		free(*oldLink);
+	}
+	
+	return;
+}
+
+void enqueue(link **h, link **t, link **nL)
+{
+
+	if (*t != NULL){
+		/* Not an empty queue */
+		(*t)->next = *nL;
+		*t = *nL; //(*t)->next;
+	}/*if*/
+	else{
+		/* It's an empty Queue */
+		//(*h)->next = *nL;
+		//should be this
+		*h = *nL;
+		*t = *nL;
+	}/* else */
+	
+	// Ensure queue is null terminated
+	(*nL)->next = NULL;
+	
+	return;
+}
+
+void dequeue(link **h, link **deQueuedLink)
+{
+	*deQueuedLink = *h;
+	/* Ensure it is not an empty queue */
+	if (*h != NULL)
+	{
+		*h = (*h)->next;
+	}/*if*/
+	
+	return;
+}
+
+char firstValue(link **h)
+{
+	return((*h)->itemType);
+}
+
+void clearQueue(link **h, link **t)
+{
+	link *temp;
+
+	while (*h != NULL){
+		temp = *h;
+		*h=(*h)->next;
+		free(temp);
+	}/*while*/
+	
+	/* Last but not least set the tail to NULL */
+	*t = NULL;		
+
+	return;
+}
+
+char isEmpty(link **h)
+{
+	return(*h == NULL);
+}
+
+int size(link **h, link **t){
+
+	link 	*temp;			/* will store the link while traversing the queue */
+	int 	numItems;
+
+	numItems = 0;
+
+	temp = *h;			/* point to the first item in the list */
+
+	while(temp != NULL){
+		numItems++;
+		temp = temp->next;
+	}/*while*/	
+	return(numItems);
 }
 
 // Killswitch ISR
@@ -466,7 +652,7 @@ ISR(INT1_vect)
 	}
 	pause_flag++;
 	pause();
-	LCDWriteIntXY(0,0,pause_flag,2);
+//	LCDWriteIntXY(0,0,pause_flag,2);
 
 /*	// Efficient pause/resume (for performance)
 	// Brake high + debounce
@@ -488,21 +674,58 @@ ISR(INT1_vect)
 }
 
 // Stepper homing interrupt
-ISR(INT2_vect){
+ISR(INT2_vect)
+{
 	disk_location = 'b';
 	homed_flag = 1;
 	EIMSK |= _BV(INT0) | _BV(INT1) | _BV(INT3) ;	// Disables the INT2 interrupt
 }
 
+// Ramp down interrupt
+ISR(INT3_vect)
+{
+	ramp_down = 0x01;
+}
+
+// End of conveyor belt interrupt
+ISR(INT4_vect)
+{
+	// Stop the belt
+	PORTL &= 0xFF;
+
+	// Move the stepper dish
+	sort(firstValue(&head));
+
+	// Remove the item from the queue
+	dequeue(&head, &oldLink);
+
+	// Deallocate item
+	destroyLink(&oldLink);
+
+	// Resume the belt
+	PORTL &= 0x7F;
+}
+	
+
 // ISR for ADC Conversion Completion
 ISR(ADC_vect)
 {
 	// Get ADC result
-	ADC_result_lsbs = ADCL;
-	ADC_result_msbs = ADCH & 0x03;
-	
-	// Set flag indicating a result has been written
-	ADC_result_flag = 1;
+	ADC_result = 0x00;
+	ADC_result |= ADCL;
+	ADC_result |= (ADCH & 0x03) << 8;
+
+	// Change ADC input channel
+	if( ADMUX & _BV(MUX0) )
+	{
+		// Select ferromagnetic input for next conversion
+		ADMUX &= !_BV(MUX0);
+	}
+	else
+	{
+		// Select reflective input for next conversion
+		ADMUX |= _BV(MUX0);
+	}
 }
 
 ISR(BADISR_vect)
@@ -512,3 +735,4 @@ ISR(BADISR_vect)
 	LCDWriteStringXY(6,1, "wrong!");
 	while(1);
 }
+
