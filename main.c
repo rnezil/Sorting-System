@@ -9,14 +9,14 @@
 # DATA
 # REVISED ############################################*/
 
-#ifndef SENSORVALUES
-#define SENSORVALUES
+#ifndef SENSOR_THRESHOLD_VALUES
+#define SENSOR_THRESHOLD_VALUES
 
-#define FERROMAGNETIC_NO_ITEM_VALUE	123
-#define REFLECTIVE_NO_ITEM_VALUE	123
+#define FERROMAGNETIC_NO_ITEM_THRESHOLD	123
+#define REFLECTIVE_NO_ITEM_THRESHOLD	123
 #define METALLIC_THRESHOLD		123	// Above->plastic, below->metal
-#define METAL_REFLECTIVE_THRESHOLD	300	// Above->steel, below->aluminium
-#define PLASTIC_REFLECTIVE_THRESHOLD	1000	// Above->black, below->white
+#define METAL_REFLECTIVITY_THRESHOLD	300	// Above->steel, below->aluminium
+#define PLASTIC_REFLECTIVITY_THRESHOLD	1000	// Above->black, below->white
 
 #endif
 
@@ -160,32 +160,32 @@ int main(int argc, char* argv[])
 			ADC_result_flag = 0x00;
 		}*/
 
-		if( ((ADMUX & _BV(MUX0)) && (ADC_result < FERROMAGNETIC_NO_ITEM_VALUE))
-				|| ((ADMUX & _BV(MUX0) ^ _BV(MUX0)) && (ADC_result < REFLECTIVE_NO_ITEM_VALUE)) )
+		if( ((ADMUX & _BV(MUX0)) && (ADC_result < FERROMAGNETIC_NO_ITEM_THRESHOLD))
+				|| ((ADMUX & _BV(MUX0) ^ _BV(MUX0)) && (ADC_result < REFLECTIVE_NO_ITEM_THRESHOLD)) )
 		{
 			// Initialize new item to be queued
 			initLink(&newItem);
 
 			// Reset sensor values
-			ferromagnetic_value = FERROMAGNETIC_NO_ITEM_VALUE;
-			reflective_value = REFLECTIVE_NO_ITEM_VALUE;
+			ferromagnetic_value = FERROMAGNETIC_NO_ITEM_THRESHOLD;
+			reflective_value = REFLECTIVE_NO_ITEM_THRESHOLD;
 
 			// Delay to work around sensor value deviations causing the while loop
 			// below to end prematurely
 			mTimer(10);
 
-			while( ((ADMUX & _BV(MUX0)) && (ADC_result < FERROMAGNETIC_NO_ITEM_VALUE))
-				|| ((ADMUX & _BV(MUX0) ^ _BV(MUX0)) && (ADC_result < REFLECTIVE_NO_ITEM_VALUE)) )
+			while( ((ADMUX & _BV(MUX0)) && (ADC_result < FERROMAGNETIC_NO_ITEM_THRESHOLD))
+				|| ((ADMUX & _BV(MUX0) ^ _BV(MUX0)) && (ADC_result < REFLECTIVE_NO_ITEM_THRESHOLD)) )
 			{
 				if(ADMUX & _BV(MUX0))
 				{
 					// Ferromagnetic value
-					if(ADC_result > ferromagnetic_value) ferromagnetic_value = ADC_result;
+					if(ADC_result < ferromagnetic_value) ferromagnetic_value = ADC_result;
 				}
 				else
 				{
 					// Reflective value
-					if(ADC_result > reflective_value) reflective_value = ADC_result;
+					if(ADC_result < reflective_value) reflective_value = ADC_result;
 				}
 			}
 
