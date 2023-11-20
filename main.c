@@ -93,7 +93,7 @@ int main(int argc, char* argv[])
 	
 	// Set INT3 to falling edge mode (ramp down)
 	// Set INT2 to falling edge mode (homing sensor)
-	// Set INT1 to falling edge mode (pause resume)
+	// Set INT1 to rising edge mode (pause resume)
 	// Set INT0 to any edge mode (kill switch)
 	EIMSK |= _BV(INT0) | _BV(INT1) | _BV(INT2) | _BV(INT3);
 	EICRA = 0xA6;
