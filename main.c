@@ -42,10 +42,10 @@
 volatile unsigned int ADC_result;
 
 // Indicates whether conveyor belt is running
-volatile unsigned char running;
+volatile int running;
 
 // Indicates whether system is in ramp-down mode
-char ramp_down = 0x00;
+volatile int ramp_down;
 
 // (description)
 volatile unsigned int plastic = 0;
@@ -82,14 +82,14 @@ int main(int argc, char* argv[])
 	cli();
 	
 	// Set initial system state
-	running = 0x00;
+	running = 0x01;
 		
 	// PWM Out
 	DDRB = 0x80;
 	
 	// DC Motor
 	DDRL = 0xF0;
-	PORTL |= 0xF0;
+	PORTL |= 0x70;
 	
 	// Stepper Motor
 	DDRA = 0xFF;
@@ -110,7 +110,7 @@ int main(int argc, char* argv[])
 	// Set INT1 to rising edge mode (pause resume)
 	// Set INT0 to any edge mode (kill switch)
 	EICRA |= _BV(ISC00) | _BV(ISC10) | _BV(ISC11) | _BV(ISC21) | _BV(ISC31);
-	EICRB |= _BV(ISC41);
+	//EICRB |= _BV(ISC41);
 	EIMSK |= _BV(INT0) | _BV(INT1) | _BV(INT2) | _BV(INT3) | _BV(INT4);
 	
 	// Enable ADC
@@ -165,7 +165,21 @@ int main(int argc, char* argv[])
 			LCDWriteStringXY(0,1,"complete.");
 			return(0);
 		}
-
+		
+		if(!running)
+		{
+			LCDClear();
+			LCDWriteStringXY(0,0, "S:");
+			LCDWriteIntXY(2,0,steel,2);
+			LCDWriteStringXY(4,0, ", A:");
+			LCDWriteIntXY(8,0,alum,2);
+			LCDWriteStringXY(10,0, ", P:");
+			LCDWriteIntXY(14,0,plastic,2);
+			LCDWriteStringXY(0,1, "Items Sorted: ");
+			LCDWriteIntXY(13,1,items_sorted,2);
+			while(!running);
+		}
+/*
 		// Wait until sensors detect an item
 		if( ((ADMUX & _BV(MUX0)) && (ADC_result < FERROMAGNETIC_NO_ITEM_THRESHOLD))
 				|| ((ADMUX & _BV(MUX0) ^ _BV(MUX0)) && (ADC_result < REFLECTIVE_NO_ITEM_THRESHOLD)) )
@@ -249,7 +263,7 @@ int main(int argc, char* argv[])
 					LCDWriteStringXY(0,0,"Scanning Error");
 					break;
 			}
-		}
+		}*/
 	}
 	
 	return(0);
@@ -287,7 +301,21 @@ void mTimer(int count)
 
 //This function rotates the stepper clockwise until the homing sensor triggers the INT2 interrupt
 void home(){
-	while (homed_flag != 1){
+	while (!homed_flag){
+		if(!running)
+		{
+			LCDClear();
+			LCDWriteStringXY(0,0, "S:");
+			LCDWriteIntXY(2,0,steel,2);
+			LCDWriteStringXY(4,0, ", A:");
+			LCDWriteIntXY(8,0,alum,2);
+			LCDWriteStringXY(10,0, ", P:");
+			LCDWriteIntXY(14,0,plastic,2);
+			LCDWriteStringXY(0,1, "Items Sorted: ");
+			LCDWriteIntXY(13,1,items_sorted,2);
+			while(!running);
+		}
+		
 		PORTA = stepper[position];
 		mTimer(20);
 		position++;
@@ -295,6 +323,9 @@ void home(){
 			position = 0;
 		}
 	}
+	PORTK |= 0xff;
+	PORTF |= 0xff;
+	mTimer(500);
 	LCDWriteStringXY(0,0,"Disk homed Black");	// Can be removed after testing
 //	LCDWriteStringXY(0,1,"Position: ");
 //	LCDWriteIntXY(11,1,position,2);
@@ -308,6 +339,20 @@ void move(int c){
 	int total = c;
 	if (disk_direction == 0){
 		while(c > 0){
+			if(!running)
+			{
+				LCDClear();
+				LCDWriteStringXY(0,0, "S:");
+				LCDWriteIntXY(2,0,steel,2);
+				LCDWriteStringXY(4,0, ", A:");
+				LCDWriteIntXY(8,0,alum,2);
+				LCDWriteStringXY(10,0, ", P:");
+				LCDWriteIntXY(14,0,plastic,2);
+				LCDWriteStringXY(0,1, "Items Sorted: ");
+				LCDWriteIntXY(13,1,items_sorted,2);
+				while(!running);
+			}
+			
 			PORTA = stepper[position];
 			if(total == 90){
 				mTimer(delay_a[i]);
@@ -330,6 +375,20 @@ void move(int c){
 	}
 	if (disk_direction == 1){
 		while (c > 0){
+			if(!running)
+			{
+				LCDClear();
+				LCDWriteStringXY(0,0, "S:");
+				LCDWriteIntXY(2,0,steel,2);
+				LCDWriteStringXY(4,0, ", A:");
+				LCDWriteIntXY(8,0,alum,2);
+				LCDWriteStringXY(10,0, ", P:");
+				LCDWriteIntXY(14,0,plastic,2);
+				LCDWriteStringXY(0,1, "Items Sorted: ");
+				LCDWriteIntXY(13,1,items_sorted,2);
+				while(!running);
+			}
+			
 			PORTA = stepper[position];
 			if(total == 90){
 				mTimer(delay_a[i]);
@@ -506,31 +565,6 @@ void print_results(){
 	}
 }
 
-void pause(){
-	if(pause_flag == 2){
-		LCDClear();
-		LCDWriteStringXY(0,0, "S:");
-		LCDWriteIntXY(2,0,steel,2);
-		LCDWriteStringXY(4,0, ", A:");
-		LCDWriteIntXY(8,0,alum,2);
-		LCDWriteStringXY(10,0, ", P:");
-		LCDWriteIntXY(14,0,plastic,2);
-		LCDWriteStringXY(0,1, "Items Sorted: ");
-		LCDWriteIntXY(13,1,items_sorted,2);
-		while((PIND & (1<<PIND1)) != (1<<PIND1)){
-			if(pause_flag == 0){
-				break;
-			}
-		}
-	}
-	else if(pause_flag == 4){
-//		LCDWriteStringXY(0,0,"Program resumed");
-//		LCDClear();
-//		LCDWriteIntXY(0,1,pause_flag,1);
-		pause_flag = 0;
-	}
-}
-
 void setup(link **h,link **t)
 {
 	*h = NULL;		/* Point the head to NOTHING (NULL) */
@@ -646,15 +680,6 @@ ISR(INT0_vect)
 // Pause/resume conveyor belt ISR
 ISR(INT1_vect)
 {
-	//mTimer(25);
-	while((PIND & (1<<PIND1)) == (1<<PIND1)){
-		mTimer(20);
-	}
-	pause_flag++;
-	pause();
-//	LCDWriteIntXY(0,0,pause_flag,2);
-
-/*	// Efficient pause/resume (for performance)
 	// Brake high + debounce
 	PORTL |= 0xF0;
 	mTimer(25);
@@ -663,14 +688,14 @@ ISR(INT1_vect)
 	{
 		// Pause
 		PORTL &= 0xFF;
-		running = 0x00;
+		running = 0;
 	}
 	else
 	{
 		// Resume
 		PORTL &= 0x7F;
-		running = 0x01;
-	}*/
+		running = 1;
+	}
 }
 
 // Stepper homing interrupt
@@ -678,13 +703,13 @@ ISR(INT2_vect)
 {
 	disk_location = 'b';
 	homed_flag = 1;
-	EIMSK |= _BV(INT0) | _BV(INT1) | _BV(INT3) ;	// Disables the INT2 interrupt
+	EIMSK = _BV(INT0) | _BV(INT1) | _BV(INT3) | _BV(INT4);
 }
 
 // Ramp down interrupt
 ISR(INT3_vect)
 {
-	ramp_down = 0x01;
+	ramp_down = 1;
 }
 
 // End of conveyor belt interrupt
@@ -714,12 +739,13 @@ ISR(ADC_vect)
 	ADC_result = 0x00;
 	ADC_result |= ADCL;
 	ADC_result |= (ADCH & 0x03) << 8;
+	
 
 	// Change ADC input channel
 	if( ADMUX & _BV(MUX0) )
 	{
 		// Select ferromagnetic input for next conversion
-		ADMUX &= !_BV(MUX0);
+		ADMUX &= ~_BV(MUX0);
 	}
 	else
 	{

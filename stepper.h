@@ -2,7 +2,7 @@
  * stepper.h
  *
  * Created: 2023-11-13 4:38:45 PM
- *  Author: edwin
+ *  Author: Reilly
  */ 
 
 
@@ -16,8 +16,7 @@ void home();
 void move(int c);
 void sort(char list_item);
 void print_results();
-void pause();
-
+	
 
 // Global variables for stepper control
 volatile char disk_location;	// Black, White, Steel, Aluminum
