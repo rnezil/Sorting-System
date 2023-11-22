@@ -21,7 +21,7 @@ Homing Sensor	19		PD2			falling edge
 
 Ramp Down	18		PD3			falling edge
 
-Exit Sensor	17		PD4			falling edge
+Exit Sensor	2		PE4			falling edge
 
 LCD K		GND
 
@@ -49,6 +49,8 @@ Stepper E2	25		PA3
 
 Stepper L3:L4	26:27		PA4:PA5
 
-Ferro Sensor	A0		PF0			adc channel 0
+Ferro Sensor	A0		PF0			adc channel 0, RL
 
-Reflect Sensor	A1		PF1			adc channel 1
+Reflect Sensor	A1		PF1			adc channel 1, OR
+
+
