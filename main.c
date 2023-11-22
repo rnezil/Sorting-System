@@ -82,7 +82,7 @@ int main(int argc, char* argv[])
 	cli();
 	
 	// Set initial system state
-	running = 0x01;
+	running = 1;
 		
 	// PWM Out
 	DDRB = 0x80;
@@ -109,8 +109,8 @@ int main(int argc, char* argv[])
 	// Set INT2 to falling edge mode (homing sensor)
 	// Set INT1 to rising edge mode (pause resume)
 	// Set INT0 to any edge mode (kill switch)
-	EICRA |= _BV(ISC00) | _BV(ISC10) | _BV(ISC11) | _BV(ISC21) | _BV(ISC31);
-	//EICRB |= _BV(ISC41);
+	EICRA |= _BV(ISC00) | _BV(ISC11) | _BV(ISC21) | _BV(ISC31);
+	EICRB |= _BV(ISC41);
 	EIMSK |= _BV(INT0) | _BV(INT1) | _BV(INT2) | _BV(INT3) | _BV(INT4);
 	
 	// Enable ADC
@@ -323,9 +323,7 @@ void home(){
 			position = 0;
 		}
 	}
-	PORTK |= 0xff;
-	PORTF |= 0xff;
-	mTimer(500);
+	
 	LCDWriteStringXY(0,0,"Disk homed Black");	// Can be removed after testing
 //	LCDWriteStringXY(0,1,"Position: ");
 //	LCDWriteIntXY(11,1,position,2);
@@ -703,7 +701,7 @@ ISR(INT2_vect)
 {
 	disk_location = 'b';
 	homed_flag = 1;
-	EIMSK = _BV(INT0) | _BV(INT1) | _BV(INT3) | _BV(INT4);
+	EIMSK &= ~_BV(INT2);
 }
 
 // Ramp down interrupt
