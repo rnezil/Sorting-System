@@ -128,7 +128,7 @@ int main(int argc, char* argv[])
 	TCCR0A |= _BV(WGM01) | _BV(WGM00);
 	
 	// Set initial duty cycle
-	OCR0A = 0x3F;
+	OCR0A = 0x40;
 	
 	// Clear OC0A on Compare Match, set OC0A at BOTTOM
 	TCCR0A |= _BV(COM0A1);
@@ -163,6 +163,8 @@ int main(int argc, char* argv[])
 			LCDWriteStringXY(0,0,"Ramping down...");
 			while(!isEmpty(&head));
 			LCDWriteStringXY(0,1,"complete.");
+			mTimer(1000);
+			DDRL |= 0xF0;
 			return(0);
 		}
 		
@@ -179,7 +181,7 @@ int main(int argc, char* argv[])
 			LCDWriteIntXY(13,1,items_sorted,2);
 			while(!running);
 		}
-/*
+
 		// Wait until sensors detect an item
 		if( ((ADMUX & _BV(MUX0)) && (ADC_result < FERROMAGNETIC_NO_ITEM_THRESHOLD))
 				|| ((ADMUX & _BV(MUX0) ^ _BV(MUX0)) && (ADC_result < REFLECTIVE_NO_ITEM_THRESHOLD)) )
@@ -263,7 +265,7 @@ int main(int argc, char* argv[])
 					LCDWriteStringXY(0,0,"Scanning Error");
 					break;
 			}
-		}*/
+		}
 	}
 	
 	return(0);
@@ -714,16 +716,18 @@ ISR(INT3_vect)
 ISR(INT4_vect)
 {
 	// Stop the belt
-	PORTL &= 0xFF;
+	PORTL |= 0xFF;
+	PORTK |= 0xFF;
+	mTimer(200);
 
 	// Move the stepper dish
-	sort(firstValue(&head));
+	//sort(firstValue(&head));
 
 	// Remove the item from the queue
-	dequeue(&head, &oldItem);
+	//dequeue(&head, &oldItem);
 
 	// Deallocate item
-	destroyLink(&oldItem);
+	//destroyLink(&oldItem);
 
 	// Resume the belt
 	PORTL &= 0x7F;
