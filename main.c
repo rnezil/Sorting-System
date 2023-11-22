@@ -9,6 +9,8 @@
 # DATA
 # REVISED ############################################*/
 
+//#define CALIBRATION_MODE
+
 #ifndef SENSOR_THRESHOLD_VALUES
 #define SENSOR_THRESHOLD_VALUES
 
@@ -78,9 +80,6 @@ int main(int argc, char* argv[])
 	link* newItem;
 	setup(&head, &tail);
 	
-	// Enter uninterruptable command sequence
-	cli();
-	
 	// Set initial system state
 	running = 1;
 		
@@ -104,23 +103,11 @@ int main(int argc, char* argv[])
 	// Set clock prescaler for timer 1B to 1/8
 	TCCR1B |= _BV(CS11);
 	
-	// Set INT4 to falling edge mode (item at end of belt)
-	// Set INT3 to falling edge mode (ramp down)
-	// Set INT2 to falling edge mode (homing sensor)
-	// Set INT1 to rising edge mode (pause resume)
-	// Set INT0 to any edge mode (kill switch)
-	EICRA |= _BV(ISC00) | _BV(ISC11) | _BV(ISC21) | _BV(ISC31);
-	EICRB |= _BV(ISC41);
-	EIMSK |= _BV(INT0) | _BV(INT1) | _BV(INT2) | _BV(INT3) | _BV(INT4);
-	
 	// Enable ADC
 	ADCSRA |= _BV(ADEN);
 	
 	// Enable automatic interrupt firing after each completed conversion
 	ADCSRA |= _BV(ADIE);
-	
-	// Enable automated conversions in free running mode
-	ADCSRA |= _BV(ADATE);
 	
 	// Set waveform generation mode to Fast PWM
 	// with TOP = OCR0A, update OCRA at TOP, set
@@ -138,6 +125,32 @@ int main(int argc, char* argv[])
 	// 8MHz/256 = 31.25KHz cycle w/ no prescaling
 	// Therefore want prescaling of 1/8 to get 3.9KHz
 	TCCR0B |= _BV(CS01);
+	
+	// Enter uninterruptable command sequence
+	cli();
+	
+	// Set INT0 to any edge mode (kill switch)
+	// Set INT1 to rising edge mode (pause resume)
+	EICRA |= _BV(ISC00) | _BV(ISC11);
+	EIMSK |= _BV(INT0) | _BV(INT1);
+	
+	// Calibrate system
+	#ifdef CALIBRATION_MODE
+	
+	sei();
+	
+	//...
+	
+	return(0);
+	
+	#endif
+	
+	// Set INT2 to falling edge mode (homing sensor)
+	// Set INT3 to falling edge mode (ramp down)
+	// Set INT4 to falling edge mode (item at end of belt)
+	EICRA |= _BV(ISC21) | _BV(ISC31);
+	EICRB |= _BV(ISC41);
+	EIMSK |= _BV(INT2) | _BV(INT3) | _BV(INT4);
 	
 	// Exit uninterruptable command sequence
 	sei();
@@ -717,8 +730,6 @@ ISR(INT4_vect)
 {
 	// Stop the belt
 	PORTL |= 0xFF;
-	PORTK |= 0xFF;
-	mTimer(200);
 
 	// Move the stepper dish
 	//sort(firstValue(&head));
