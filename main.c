@@ -11,6 +11,7 @@
 
 //#define PRECALIBRATION_MODE
 //#define CALIBRATION_MODE
+//#define TIMER_CALIBRATION_MODE
 
 #ifndef SENSOR_VALUES
 #define SENSOR_VALUES
@@ -119,7 +120,7 @@ int main(int argc, char* argv[])
 	// Set clock prescaler for timer 1B to 1/8
 	TCCR1B |= _BV(CS11);
 	
-	// Set TOP for timer 3
+	// Set based on timer calibration results
 	OCR3A = 0x7FFF;
 	
 	// Set count to zero for timer 3
@@ -163,7 +164,8 @@ int main(int argc, char* argv[])
 	// Last result: 992
 	
 	sei();
-	
+
+	// Print values
 	int noitem_val;
 	while(1)
 	{
@@ -172,7 +174,7 @@ int main(int argc, char* argv[])
 		ADC_result_flag = 0;
 		LCDClear();
 		LCDWriteInt(ADC_result,5);
-		mTimer(500);
+		mTimer(333);
 	}
 	
 	#endif
@@ -187,7 +189,12 @@ int main(int argc, char* argv[])
 	
 	sei();
 	
-	// Tracks sensor bounds
+	// Initialize ADC
+	ADCSRA |= _BV(ADSC);
+	while(!ADC_result_flag);
+	ADC_result_flag = 0;
+
+	// Track sensor values
 	unsigned values[10];
 	unsigned current_value;
 	unsigned low_value;
@@ -253,7 +260,62 @@ int main(int argc, char* argv[])
 		LCDWriteIntXY(7,1,high_value);
 		mTimer(5000);
 	}
+
+	return(0);
 	
+	#endif
+
+	// Determine how long it takes for an item to go through the sensor
+	#ifdef TIMER_CALIBRATION_MODE
+
+	sei();
+	
+	// Set timer 3 to normal mode
+	TCCR3B &= ~_BV(WGM32);
+
+	// Initialize ADC
+	ADCSRA |= _BV(ADSC);
+	while(!ADC_result_flag);
+	ADC_result_flag = 0;
+
+	// Store timer values
+	unsigned timer_values[10];
+
+	for(int i = 0; i < 10; i++)
+	{
+		// Wait for item
+		inbound = 0;
+		while(!inbound);
+		TCNT3 = 0x0000;
+
+		// Time how long it takes for item to go through
+		ADCSRA |= _BV(ADSC);
+		while(!ADC_result_flag);
+		while(ADC_result < NO_ITEM_THRESHOLD)
+		{
+			ADC_result_flag = 0;
+			ADCSRA |= _BV(ADSC);
+			while(!ADC_result_flag);
+		}
+		timer_values[i] = TCNT3;
+	}
+
+	// Print results
+	unsigned low_value = timer_values[0];
+	unsigned high_value = low_value;
+	for(int i = 1; i < 10; i++)
+	{
+		if(timer_values[i] < low_value) low_value = timer_values[i];
+		if(timer_values[i] > high_value) high_value = timer_values[i];
+	}
+	LCDClear();
+	LCDWriteIntXY(0,0,low_value);
+	LCDWriteStringXY(4,0,"to");
+	LCDWriteIntXY(7,0,high_value);
+	mTimer(5000);
+
+	return(0);
+
 	#endif
 	
 	// Set INT2 to falling edge mode (homing sensor)
@@ -266,15 +328,16 @@ int main(int argc, char* argv[])
 	// Exit uninterruptable command sequence
 	sei();
 	
-	// Initiate ADC conversion
+	// Initialize ADC
 	ADCSRA |= _BV(ADSC);
+	while(!ADC_result_flag);
+	ADC_result_flag = 0;
 	
 	// Home the stepper
 	home();
 
-	// Sensor values for current item
-	unsigned ferromagnetic_value;
-	unsigned reflective_value;
+	// Sensor value
+	unsigned sensor_value;
 	
 	while(1)
 	{	
