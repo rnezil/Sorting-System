@@ -367,91 +367,6 @@ int main(int argc, char* argv[])
 			LCDWriteIntXY(13,1,items_sorted,2);
 			while(!running);
 		}
-
-		// Wait until sensors detect an item
-		if( ((ADMUX & _BV(MUX0)) && (ADC_result < FERROMAGNETIC_NO_ITEM_THRESHOLD))
-				|| ((ADMUX & _BV(MUX0) ^ _BV(MUX0)) && (ADC_result < REFLECTIVE_NO_ITEM_THRESHOLD)) )
-		{
-			// Initialize new item to be queued
-			initLink(&newItem);
-
-			// Reset sensor values
-			ferromagnetic_value = FERROMAGNETIC_NO_ITEM_THRESHOLD;
-			reflective_value = REFLECTIVE_NO_ITEM_THRESHOLD;
-
-			// Delay to work around sensor value deviations causing the while loop
-			// below to end prematurely
-			mTimer(10);
-
-			while( ((ADMUX & _BV(MUX0)) && (ADC_result < FERROMAGNETIC_NO_ITEM_THRESHOLD))
-				|| ((ADMUX & _BV(MUX0) ^ _BV(MUX0)) && (ADC_result < REFLECTIVE_NO_ITEM_THRESHOLD)) )
-			{
-				if(ADMUX & _BV(MUX0))
-				{
-					// Ferromagnetic value
-					if(ADC_result < ferromagnetic_value) ferromagnetic_value = ADC_result;
-				}
-				else
-				{
-					// Reflective value
-					if(ADC_result < reflective_value) reflective_value = ADC_result;
-				}
-			}
-
-			// Determine what item type is and add to queue
-			if(ferromagnetic_value < METALLIC_THRESHOLD)
-			{
-				// Item is metal
-				if(reflective_value < METAL_REFLECTIVITY_THRESHOLD)
-				{
-					// Item is aluminium
-					newItem->itemType = 'a';
-				}
-				else
-				{
-					// Item is steel
-					newItem->itemType = 's';
-				}
-			}
-			else
-			{
-				// Item is plastic
-				if(reflective_value < PLASTIC_REFLECTIVITY_THRESHOLD)
-				{
-					// Item is white plastic
-					newItem->itemType = 'w';
-				}
-				else
-				{
-					// Item is black plastic
-					newItem->itemType = 'b';
-				}
-			}
-
-			// Add new item to queue
-			enqueue(&head, &tail, &newItem);
-
-			// Print item to LCD
-			LCDClear();
-			switch(newItem->itemType)
-			{
-				case 's':
-					LCDWriteStringXY(0,0,"Steel");
-					break;
-				case 'a':
-					LCDWriteStringXY(0,0,"Aluminium");
-					break;
-				case 'b':
-					LCDWriteStringXY(0,0,"Black Plastic");
-					break;
-				case 'w':
-					LCDWriteStringXY(0,0,"White Plastic");
-					break;
-				default:
-					LCDWriteStringXY(0,0,"Scanning Error");
-					break;
-			}
-		}
 	}
 	
 	return(0);
@@ -916,6 +831,12 @@ ISR(INT4_vect)
 	// Resume the belt
 	PORTL &= 0x7F;
 }
+
+// First sensor trigger
+ISR(INT5_vect)
+{
+	inbound = 1;
+}
 	
 
 // ISR for ADC Conversion Completion
@@ -926,24 +847,6 @@ ISR(ADC_vect)
 	ADC_result |= ADCL;
 	ADC_result |= (ADCH & 0x03) << 8;
 	ADC_result_flag = 1;
-
-	#ifndef PRECALIBRATION_MODE
-	#ifndef CALIBRATION_MODE
-	
-	// Change ADC input channel
-	if( ADMUX & _BV(MUX0) )
-	{
-		// Select ferromagnetic input for next conversion
-		ADMUX &= ~_BV(MUX0);
-	}
-	else
-	{
-		// Select reflective input for next conversion
-		ADMUX |= _BV(MUX0);
-	}
-	
-	#endif
-	#endif
 }
 
 ISR(BADISR_vect)
