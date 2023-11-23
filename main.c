@@ -12,14 +12,18 @@
 //#define PRECALIBRATION_MODE
 //#define CALIBRATION_MODE
 
-#ifndef SENSOR_THRESHOLD_VALUES
-#define SENSOR_THRESHOLD_VALUES
+#ifndef SENSOR_VALUES
+#define SENSOR_VALUES
 
-#define FERROMAGNETIC_NO_ITEM_THRESHOLD	123
-#define REFLECTIVE_NO_ITEM_THRESHOLD	123
-#define METALLIC_THRESHOLD		123	// Above->plastic, below->metal
-#define METAL_REFLECTIVITY_THRESHOLD	300	// Above->steel, below->aluminium
-#define PLASTIC_REFLECTIVITY_THRESHOLD	1000	// Above->black, below->white
+#define NO_ITEM_VALUE		992
+#define STEEL_HIGH		123
+#define STEEL_LOW		123
+#define ALUMINIUM_HIGH		123
+#define ALUMINIUM_LOW		123
+#define BLACK_PLASTIC_HIGH	123
+#define BLACK_PLASTIC_LOW	123
+#define WHITE_PLASTIC_HIGH	123
+#define WHITE_PLASTIC_LOW	123
 
 #endif
 
@@ -41,11 +45,14 @@
 // could have INT1 INT2 and INT3 all pending at the same
 // time while INT0 is being serviced.
 
-// Variable for storing ADC conversion result
+// Stores ADC conversion result
 volatile unsigned int ADC_result;
 
-// Variable indicating ADC has completed a conversion
+// Indicates ADC has completed a conversion
 volatile int ADC_result_flag = 0;
+
+// Indicates item has reached first optical sensor
+volatile int inbound = 0;
 
 // Indicates whether conveyor belt is running
 volatile int running = 1;
@@ -149,14 +156,11 @@ int main(int argc, char* argv[])
 	EICRA |= _BV(ISC00) | _BV(ISC11);
 	EIMSK |= _BV(INT0) | _BV(INT1);
 	
-	// Precalibration mode: determine sensor values for
+	// Precalibration mode: determine sensor value for
 	// no-item case
 	#ifdef PRECALIBRATION_MODE
 	
-	/* Last result:
-	*  reflective:	992-993
-	*  optical:		30-31
-	*/
+	// Last result: 992
 	
 	sei();
 	
@@ -172,59 +176,83 @@ int main(int argc, char* argv[])
 	}
 	
 	#endif
+
+	// Set INT5 to rising edge mode (first optical sensor)
+	EICRB |= _BV(ISC51) | _BV(ISC50);
+	EIMSK |= _BV(INT5);
 	
 	// Calibrate system: run each type through 10 times, take 
 	// the range of the minimums of each piece
-	#ifdef FERROMAGNETIC_CALIBRATION_MODE
+	#ifdef CALIBRATION_MODE
 	
 	sei();
 	
-	LCDClear();
-	
-	for(int i = 0; i < 40; i++)
+	// Tracks sensor bounds
+	unsigned values[10];
+	unsigned current_value;
+	unsigned low_value;
+	unsigned high_value;
+
+	// Loop 4 times
+	for(int i = 0; i < 4; i++)
 	{
-		while(ADC_)
-		
-		/*
-		// Start timer 3
-		TIFR3 |= _BV(OCF3A);
-	
-		// Loop for processing the value of a single item
-		while(!(TIFR3 & _BV(OCF3A)))
+		// Output info to LCD
+		LCDClear();
+		switch(i)
 		{
-			if(ADC_result_flag)
-			{
-				
-			}
-		}*/
-	}
-	
-	return(0);
-	
-	#endif
-	
-	#ifdef FERROMAGNETIC_CALIBRATION_MODE
-	
-	sei();
-	
-	LCDClear();
-	
-	for(int i = 0; i < 40; i++)
-	{
-		// Start timer 3
-		TIFR3 |= _BV(OCF3A);
-		
-		// Loop for processing the value of a single item
-		while(!(TIFR3 & _BV(OCF3A)))
-		{
-			if(ADC_result_flag)
-			{
-				
-			}
+			case 0:
+				LCDWriteStringXY(0,0,"Steel");
+				break;
+			case 1:
+				LCDWriteStringXY(0,0,"Aluminium");
+				break;
+			case 2:
+				LCDWriteStringXY(0,0,"Black Plastic");
+				break;
+			case 3:
+				LCDWriteStringXY(0,0,"White Plastic");
+				break;
+			default:
+				LCDWriteStringXY(0,0,"Error");
+				break;
 		}
-	}
+
+		for(int j = 0; j < 10; j++)
+		{
+			// Wait for item
+			while(!inbound);
+			inbound = 0;
 	
-	return(0);
+			// Start timer after recognizing item
+			TIFR3 |= _BV(OCF3A);
+		
+			// Determine item value
+			while(!(TIFR3 & _BV(OCF3A)))
+			{
+				// Do a conversion; save result if less than current minimum
+				ADCSRA |= _BV(ADSC);
+				while(!ADC_result_flag);
+				ADC_result_flag = 0;
+				if(ADC_result < current_value) current_value = ADC_result;
+			}
+	
+			// Add item value to array
+			values[j] = current_value;
+		}
+
+		// Print results
+		low_value = values[0];
+		high_values = low_value;
+		for(int j = 1; j < 10; j++)
+		{
+			if(values[j] < low_value) low_value = values[j];
+			if(values[j] > high_value) high_value = values[j];
+		}
+		LCDWriteIntXY(0,1,low_value);
+		LCDWriteStringXY(4,1,"to");
+		LCDWriteIntXY(7,1,high_value);
+		mTimer(5000);
+	}
 	
 	#endif
 	
