@@ -9,6 +9,7 @@
 # DATA
 # REVISED ############################################*/
 
+//#define PRECALIBRATION_MODE
 //#define CALIBRATION_MODE
 
 #ifndef SENSOR_THRESHOLD_VALUES
@@ -43,11 +44,14 @@
 // Variable for storing ADC conversion result
 volatile unsigned int ADC_result;
 
+// Variable indicating ADC has completed a conversion
+volatile int ADC_result_flag = 0;
+
 // Indicates whether conveyor belt is running
-volatile int running;
+volatile int running = 1;
 
 // Indicates whether system is in ramp-down mode
-volatile int ramp_down;
+volatile int ramp_down = 0;
 
 // (description)
 volatile unsigned int plastic = 0;
@@ -79,9 +83,6 @@ int main(int argc, char* argv[])
 	// Prepare the queue
 	link* newItem;
 	setup(&head, &tail);
-	
-	// Set initial system state
-	running = 1;
 		
 	// PWM Out
 	DDRB = 0x80;
@@ -100,8 +101,22 @@ int main(int argc, char* argv[])
 	DDRK = 0xFF;
 	DDRF = 0xC0;
 	
+	// Set timer 3 to CTC mode
+	TCCR3B |= _BV(WGM32);
+	
+	// Set timer 3 clock prescaler to 1/64
+	// -> timer 3 runs at 8MHz/64 = 125kHz
+	// -> 0x0000 to 0xFFFF in 0.52s
+	TCCR3B |= _BV(CS31) | _BV(CS30);
+	
 	// Set clock prescaler for timer 1B to 1/8
 	TCCR1B |= _BV(CS11);
+	
+	// Set TOP for timer 3
+	OCR3A = 0x7FFF;
+	
+	// Set count to zero for timer 3
+	TCNT3 = 0x0000;
 	
 	// Enable ADC
 	ADCSRA |= _BV(ADEN);
@@ -134,12 +149,80 @@ int main(int argc, char* argv[])
 	EICRA |= _BV(ISC00) | _BV(ISC11);
 	EIMSK |= _BV(INT0) | _BV(INT1);
 	
-	// Calibrate system
-	#ifdef CALIBRATION_MODE
+	// Precalibration mode: determine sensor values for
+	// no-item case
+	#ifdef PRECALIBRATION_MODE
+	
+	/* Last result:
+	*  reflective:	992-993
+	*  optical:		30-31
+	*/
 	
 	sei();
 	
-	//...
+	int noitem_val;
+	while(1)
+	{
+		ADCSRA |= _BV(ADSC);
+		while(!ADC_result_flag);
+		ADC_result_flag = 0;
+		LCDClear();
+		LCDWriteInt(ADC_result,5);
+		mTimer(500);
+	}
+	
+	#endif
+	
+	// Calibrate system: run each type through 10 times, take 
+	// the range of the minimums of each piece
+	#ifdef FERROMAGNETIC_CALIBRATION_MODE
+	
+	sei();
+	
+	LCDClear();
+	
+	for(int i = 0; i < 40; i++)
+	{
+		while(ADC_)
+		
+		/*
+		// Start timer 3
+		TIFR3 |= _BV(OCF3A);
+	
+		// Loop for processing the value of a single item
+		while(!(TIFR3 & _BV(OCF3A)))
+		{
+			if(ADC_result_flag)
+			{
+				
+			}
+		}*/
+	}
+	
+	return(0);
+	
+	#endif
+	
+	#ifdef FERROMAGNETIC_CALIBRATION_MODE
+	
+	sei();
+	
+	LCDClear();
+	
+	for(int i = 0; i < 40; i++)
+	{
+		// Start timer 3
+		TIFR3 |= _BV(OCF3A);
+		
+		// Loop for processing the value of a single item
+		while(!(TIFR3 & _BV(OCF3A)))
+		{
+			if(ADC_result_flag)
+			{
+				
+			}
+		}
+	}
 	
 	return(0);
 	
@@ -155,8 +238,7 @@ int main(int argc, char* argv[])
 	// Exit uninterruptable command sequence
 	sei();
 	
-	// Initialize ADC, start one conversion at the
-	// beginning
+	// Initiate ADC conversion
 	ADCSRA |= _BV(ADSC);
 	
 	// Home the stepper
@@ -748,12 +830,15 @@ ISR(INT4_vect)
 // ISR for ADC Conversion Completion
 ISR(ADC_vect)
 {
-	// Get ADC result
-	ADC_result = 0x00;
+	// Get ADC result and indicate successful conversion
+	ADC_result = 0;
 	ADC_result |= ADCL;
 	ADC_result |= (ADCH & 0x03) << 8;
-	
+	ADC_result_flag = 1;
 
+	#ifndef PRECALIBRATION_MODE
+	#ifndef CALIBRATION_MODE
+	
 	// Change ADC input channel
 	if( ADMUX & _BV(MUX0) )
 	{
@@ -765,6 +850,9 @@ ISR(ADC_vect)
 		// Select reflective input for next conversion
 		ADMUX |= _BV(MUX0);
 	}
+	
+	#endif
+	#endif
 }
 
 ISR(BADISR_vect)
