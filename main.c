@@ -11,14 +11,14 @@
 
 //#define PRECALIBRATION_MODE
 //#define CALIBRATION_MODE
-//#define TIMER_CALIBRATION_MODE
+#define TIMER_CALIBRATION_MODE
 
 #ifndef SENSOR_VALUES
 #define SENSOR_VALUES
 
-#define NO_ITEM_VALUE		992
-#define STEEL_HIGH		123
-#define STEEL_LOW		123
+#define NO_ITEM_THRESHOLD	999
+#define STEEL_HIGH			123
+#define STEEL_LOW			123
 #define ALUMINIUM_HIGH		123
 #define ALUMINIUM_LOW		123
 #define BLACK_PLASTIC_HIGH	123
@@ -164,17 +164,28 @@ int main(int argc, char* argv[])
 	// Last result: 992
 	
 	sei();
+	
+	// Initialize ADC
+	ADCSRA |= _BV(ADSC);
+	while(!ADC_result_flag);
+	ADC_result_flag = 0;
+	
+	// Give it a second or two
+	mTimer(2000);
+	
+	// Determine the lowest value
+	unsigned no_item_value = 1337;
 
 	// Print values
-	int noitem_val;
 	while(1)
 	{
 		ADCSRA |= _BV(ADSC);
 		while(!ADC_result_flag);
 		ADC_result_flag = 0;
 		LCDClear();
-		LCDWriteInt(ADC_result,5);
-		mTimer(333);
+		if(ADC_result < no_item_value) no_item_value = ADC_result;
+		LCDWriteInt(no_item_value,4);
+		mTimer(500);
 	}
 	
 	#endif
@@ -249,15 +260,15 @@ int main(int argc, char* argv[])
 
 		// Print results
 		low_value = values[0];
-		high_values = low_value;
+		high_value = low_value;
 		for(int j = 1; j < 10; j++)
 		{
 			if(values[j] < low_value) low_value = values[j];
 			if(values[j] > high_value) high_value = values[j];
 		}
-		LCDWriteIntXY(0,1,low_value);
+		LCDWriteIntXY(0,1,low_value,3);
 		LCDWriteStringXY(4,1,"to");
-		LCDWriteIntXY(7,1,high_value);
+		LCDWriteIntXY(7,1,high_value,3);
 		mTimer(5000);
 	}
 
