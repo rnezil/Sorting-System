@@ -11,20 +11,24 @@
 
 //#define PRECALIBRATION_MODE
 //#define CALIBRATION_MODE
-#define TIMER_CALIBRATION_MODE
+//#define TIMER_CALIBRATION_MODE
 
 #ifndef SENSOR_VALUES
 #define SENSOR_VALUES
 
-#define NO_ITEM_THRESHOLD	1004
-#define STEEL_HIGH			123
-#define STEEL_LOW			123
-#define ALUMINIUM_HIGH		123
-#define ALUMINIUM_LOW		123
-#define BLACK_PLASTIC_HIGH	123
-#define BLACK_PLASTIC_LOW	123
-#define WHITE_PLASTIC_HIGH	123
-#define WHITE_PLASTIC_LOW	123
+#define NO_ITEM_THRESHOLD	1000
+
+#define STEEL_LOW			368
+#define STEEL_HIGH			403
+
+#define ALUMINIUM_LOW		32
+#define ALUMINIUM_HIGH		48
+
+#define BLACK_PLASTIC_LOW	927
+#define BLACK_PLASTIC_HIGH	1008
+
+#define WHITE_PLASTIC_LOW	935
+#define WHITE_PLASTIC_HIGH	942
 
 #endif
 
@@ -121,7 +125,7 @@ int main(int argc, char* argv[])
 	TCCR1B |= _BV(CS11);
 	
 	// Set based on timer calibration results
-	OCR3A = 0xFFFF;
+	OCR3A = 19000;
 	
 	// Set count to zero for timer 3
 	TCNT3 = 0x0000;
@@ -138,7 +142,7 @@ int main(int argc, char* argv[])
 	TCCR0A |= _BV(WGM01) | _BV(WGM00);
 	
 	// Set initial duty cycle
-	OCR0A = 0x60;
+	OCR0A = 96;
 	
 	// Clear OC0A on Compare Match, set OC0A at BOTTOM
 	TCCR0A |= _BV(COM0A1);
@@ -266,9 +270,9 @@ int main(int argc, char* argv[])
 			if(values[j] < low_value) low_value = values[j];
 			if(values[j] > high_value) high_value = values[j];
 		}
-		LCDWriteIntXY(0,1,low_value,3);
-		LCDWriteStringXY(4,1,"to");
-		LCDWriteIntXY(7,1,high_value,3);
+		LCDWriteIntXY(0,1,low_value,4);
+		LCDWriteStringXY(5,1,"to");
+		LCDWriteIntXY(8,1,high_value,4);
 		mTimer(5000);
 	}
 
