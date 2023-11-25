@@ -16,7 +16,7 @@
 #ifndef SENSOR_VALUES
 #define SENSOR_VALUES
 
-#define NO_ITEM_THRESHOLD	999
+#define NO_ITEM_THRESHOLD	1004
 #define STEEL_HIGH			123
 #define STEEL_LOW			123
 #define ALUMINIUM_HIGH		123
@@ -121,7 +121,7 @@ int main(int argc, char* argv[])
 	TCCR1B |= _BV(CS11);
 	
 	// Set based on timer calibration results
-	OCR3A = 0x7FFF;
+	OCR3A = 0xFFFF;
 	
 	// Set count to zero for timer 3
 	TCNT3 = 0x0000;
@@ -138,7 +138,7 @@ int main(int argc, char* argv[])
 	TCCR0A |= _BV(WGM01) | _BV(WGM00);
 	
 	// Set initial duty cycle
-	OCR0A = 0x40;
+	OCR0A = 0x60;
 	
 	// Clear OC0A on Compare Match, set OC0A at BOTTOM
 	TCCR0A |= _BV(COM0A1);
@@ -280,33 +280,50 @@ int main(int argc, char* argv[])
 	#ifdef TIMER_CALIBRATION_MODE
 
 	sei();
-	
-	// Set timer 3 to normal mode
-	TCCR3B &= ~_BV(WGM32);
 
 	// Initialize ADC
 	ADCSRA |= _BV(ADSC);
 	while(!ADC_result_flag);
 	ADC_result_flag = 0;
+	
+	// Give it a second
+	mTimer(1000);
 
 	// Store timer values
-	unsigned timer_values[10];
+	unsigned timer_values[10]; 
 
 	for(int i = 0; i < 10; i++)
 	{
-		// Wait for item
+		// Start the timer
 		inbound = 0;
 		while(!inbound);
 		TCNT3 = 0x0000;
+		TIFR3 |= _BV(OCF3A);
 
 		// Time how long it takes for item to go through
 		ADCSRA |= _BV(ADSC);
 		while(!ADC_result_flag);
-		while(ADC_result < NO_ITEM_THRESHOLD)
+		
+		// no_item_time gets incremented for each time the
+		// ADC result is greater than the no-item threshold,
+		// and it gets reset each time the ADC result is beneath
+		// this threshold. 
+		// no_item_time = 2000 corresponds to ~5ms no-item time
+		// no_item_time = 4000 corresponds to ~10ms no-item time
+		unsigned no_item_time = 0;
+		while(no_item_time < 4000)
 		{
 			ADC_result_flag = 0;
 			ADCSRA |= _BV(ADSC);
 			while(!ADC_result_flag);
+			if(ADC_result >= NO_ITEM_THRESHOLD)
+			{
+				no_item_time++;
+			}
+			else
+			{
+				no_item_time = 0;
+			}
 		}
 		timer_values[i] = TCNT3;
 	}
@@ -320,9 +337,9 @@ int main(int argc, char* argv[])
 		if(timer_values[i] > high_value) high_value = timer_values[i];
 	}
 	LCDClear();
-	LCDWriteIntXY(0,0,low_value);
-	LCDWriteStringXY(4,0,"to");
-	LCDWriteIntXY(7,0,high_value);
+	LCDWriteIntXY(0,0,low_value,5);
+	LCDWriteStringXY(6,0,"to");
+	LCDWriteIntXY(10,0,high_value,5);
 	mTimer(5000);
 
 	return(0);
