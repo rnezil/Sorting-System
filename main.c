@@ -10,7 +10,7 @@
 # REVISED ############################################*/
 
 //#define PRECALIBRATION_MODE
-#define CALIBRATION_MODE
+//#define CALIBRATION_MODE
 //#define TIMER_CALIBRATION_MODE
 
 #ifdef TIMER_CALIBRATION_MODE
@@ -85,11 +85,13 @@ volatile int running = 1;
 // Indicates whether system is in ramp-down mode
 volatile int ramp_down = 0;
 
-// (description)
+// Tracks number of items sorted
 volatile unsigned int plastic = 0;
 volatile unsigned int steel = 0;
 volatile unsigned int alum = 0;
-volatile unsigned char pause_flag = 0;
+
+// Track size of queue
+volatile int num_items = 0;
 	
 // Make queue head and tail global so that it can be
 // accessed by ISR's
@@ -383,9 +385,12 @@ int main(int argc, char* argv[])
 	// Home the stepper
 	home();
 
-	// Sensor value
-	unsigned sensor_value;
+	// Stores ADC conversion result from sensor
+	unsigned current_value;
 	
+	// Print info
+	LCDClear();
+	LCDWriteStringXY(0,0,"Sorting...");
 	while(1)
 	{	
 		// If ramp-down mode is active, wait for currently enqueued items to
@@ -415,7 +420,56 @@ int main(int argc, char* argv[])
 			while(!running);
 		}
 		
-		
+		if(inbound)
+		{
+			// Reset inbound status
+			inbound = 0;
+			
+			// Reset current item value
+			current_value = 1337;
+			
+			// Zero the timer
+			TCNT3 = 0x0000;
+			
+			// Start timer after recognizing item
+			TIFR3 |= _BV(OCF3A);
+			
+			// Determine item value
+			while(!(TIFR3 & _BV(OCF3A)))
+			{
+				// Do a conversion; save result if less than current minimum
+				ADCSRA |= _BV(ADSC);
+				while(!ADC_result_flag);
+				ADC_result_flag = 0;
+				if(ADC_result < current_value) current_value = ADC_result;
+			}
+			
+			// Add item to queue
+			initLink(&newItem);
+			if(current_value < (ALUMINIUM_HIGH + STEEL_LOW)/2)
+			{
+				newItem->itemType = 'a';
+				//LCDWriteStringXY(0,1,"Alum");
+			}
+			else if(current_value < (STEEL_HIGH + WHITE_PLASTIC_LOW)/2)
+			{
+				newItem->itemType = 's';
+				//LCDWriteStringXY(0,1,"Steel");
+			}
+			else if(current_value < (WHITE_PLASTIC_HIGH + BLACK_PLASTIC_LOW)/2)
+			{
+				newItem->itemType = 'w';
+				//LCDWriteStringXY(0,1,"White");
+			}
+			else
+			{
+				newItem->itemType = 'b';
+				//LCDWriteStringXY(0,1,"Black");
+			}
+			enqueue(&head,&tail,&newItem);
+			num_items++;
+			LCDWriteIntXY(14,0,num_items,2);
+		}
 	}
 	
 	return(0);
@@ -564,6 +618,9 @@ void move(int c){
 // This function moves the sorting bucket to a location based on part in list
 void sort(char item)
 {
+	// Stop the belt
+	PORTL |= 0xFF;
+	
 	switch(disk_location)
 	{
 		case 'b':
@@ -588,10 +645,6 @@ void sort(char item)
 			move(HALF_TURN);
 			disk_location = 'w';
 			break;
-			
-			default:
-			// exit with error code
-			exit(1);
 		}
 		break;
 		
@@ -617,10 +670,6 @@ void sort(char item)
 			move(QUARTER_TURN);
 			disk_location = 'w';
 			break;
-			
-			default:
-			// exit with error code
-			exit(1);
 		}
 		break;
 		
@@ -646,10 +695,6 @@ void sort(char item)
 			move(QUARTER_TURN);
 			disk_location = 's';
 			break;
-			
-			default:
-			// exit with error code
-			exit(1);
 		}
 		break;
 		
@@ -675,20 +720,15 @@ void sort(char item)
 			move(QUARTER_TURN);
 			disk_location = 'w';
 			break;
-			
-			default:
-			// exit with error code
-			exit(1);
 		}
 		break;
-		
-		default:
-		// exit with error code
-		exit(1);
 	}
 	
 	items_sorted++;
 	// dump item into bucket
+	
+	// Resume the belt
+	PORTL &= 0x7F;
 }
 
 // Function to test sorting of a list
@@ -763,14 +803,23 @@ void enqueue(link **h, link **t, link **nL)
 	return;
 }
 
-void dequeue(link **h, link **deQueuedLink)
+void dequeue(link **h, link **t, link **deQueuedLink)
 {
 	*deQueuedLink = *h;
+	
+	// Special case for size 1 queue
+	if( *h == *t )
+	{
+		*t = NULL;
+	}
+	
 	/* Ensure it is not an empty queue */
 	if (*h != NULL)
 	{
 		*h = (*h)->next;
 	}/*if*/
+	
+	(*deQueuedLink)->next = NULL;
 	
 	return;
 }
@@ -867,15 +916,36 @@ ISR(INT4_vect)
 {
 	// Stop the belt
 	PORTL |= 0xFF;
+	
+	// Print info
+	switch(firstValue(&head))
+	{
+		case 'a':
+		LCDWriteStringXY(0,1,"Aluminium       ");
+		break;
+		
+		case 's':
+		LCDWriteStringXY(0,1,"Steel           ");
+		break;
+		
+		case 'b':
+		LCDWriteStringXY(0,1,"Black Plastic   ");
+		break;
+		
+		case 'w':
+		LCDWriteStringXY(0,1,"White Plastic   ");
+		break;
+	}
 
 	// Move the stepper dish
-	//sort(firstValue(&head));
+	sort(firstValue(&head));
+	//num_items--;
 
 	// Remove the item from the queue
-	//dequeue(&head, &oldItem);
+	dequeue(&head, &tail, &oldItem);
 
 	// Deallocate item
-	//destroyLink(&oldItem);
+	destroyLink(&oldItem);
 
 	// Resume the belt
 	PORTL &= 0x7F;
