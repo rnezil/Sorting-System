@@ -24,7 +24,7 @@ volatile int homed_flag = 0;	// Set to 1 once homing sensor is tripped and bucke
 int position = 0;			// stepper position in stepper array(0-3)
 int disk_direction = 0;		// 0 = clockwise 1 = counter clockwise
 int items_sorted = 0;		// for testing only
-int stepper[4] = {0b00101011, 0b00011101, 0b00101101, 0b00101011};	// Stepper positions
+int stepper[4] = {0b00011011, 0b00011101, 0b00101101, 0b00101011};	// Stepper positions
 int delay_a[50] = {20,19.5,19,18.5,18,17.5,17,16.5,16,15.5,15,14.5,14,13.5,13,12.5,12,11.5,11,10.5,10,9.5,9,8.5,8
 					,7.5,8.5,9,9.5,10,10.5,11,11.5,12,12.5,13,13.5,14,14.5,15,15.5,16,16.5,17,17.5,18,18.5,19,19.5,20};
 
