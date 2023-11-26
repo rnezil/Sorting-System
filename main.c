@@ -10,25 +10,45 @@
 # REVISED ############################################*/
 
 //#define PRECALIBRATION_MODE
-//#define CALIBRATION_MODE
+#define CALIBRATION_MODE
 //#define TIMER_CALIBRATION_MODE
+
+#ifdef TIMER_CALIBRATION_MODE
+
+// Determines how long reflective sensor must pick up
+// readings above the no-item threshold before item
+// processing can be completed.
+// NO_ITEM_TIME 2000 corresponds to ~5ms no-item time
+// NO_ITEM_TIME 4000 corresponds to ~10ms no-item time
+// etc.
+#define NO_ITEM_TIME		8000
+
+// Deviance from NO_ITEM_THRESHOLD that can
+// still be counted as no-item status
+#define AMBIENT_DEVIANCE	7
+
+#endif
 
 #ifndef SENSOR_VALUES
 #define SENSOR_VALUES
 
-#define NO_ITEM_THRESHOLD	1000
+#define NO_ITEM_THRESHOLD	992
 
-#define STEEL_LOW			368
-#define STEEL_HIGH			403
+#define STEEL_LOW			255
+#define STEEL_HIGH			527
 
-#define ALUMINIUM_LOW		32
+#define ALUMINIUM_LOW		35
 #define ALUMINIUM_HIGH		48
 
-#define BLACK_PLASTIC_LOW	927
-#define BLACK_PLASTIC_HIGH	1008
+#define BLACK_PLASTIC_LOW	931
+#define BLACK_PLASTIC_HIGH	952
 
-#define WHITE_PLASTIC_LOW	935
-#define WHITE_PLASTIC_HIGH	942
+#define WHITE_PLASTIC_LOW	871
+#define WHITE_PLASTIC_HIGH	896
+
+// Time to run ADC conversions for upon seeing item
+// Divide by 125 to get value in ms
+#define STOPWATCH			25888
 
 #endif
 
@@ -118,17 +138,22 @@ int main(int argc, char* argv[])
 	
 	// Set timer 3 clock prescaler to 1/64
 	// -> timer 3 runs at 8MHz/64 = 125kHz
-	// -> 0x0000 to 0xFFFF in 0.52s
+	// -> timer period = 0.52s
 	TCCR3B |= _BV(CS31) | _BV(CS30);
 	
 	// Set clock prescaler for timer 1B to 1/8
 	TCCR1B |= _BV(CS11);
 	
 	// Set based on timer calibration results
-	OCR3A = 19000;
+	#ifdef TIMER_CALIBRATION_MODE
 	
-	// Set count to zero for timer 3
-	TCNT3 = 0x0000;
+	OCR3A = 0xFFFF;
+	
+	#else
+	
+	OCR3A = STOPWATCH;
+	
+	#endif
 	
 	// Enable ADC
 	ADCSRA |= _BV(ADEN);
@@ -178,7 +203,7 @@ int main(int argc, char* argv[])
 	mTimer(2000);
 	
 	// Determine the lowest value
-	unsigned no_item_value = 1337;
+	unsigned no_item_value = 0xFFFF;
 
 	// Print values
 	while(1)
@@ -189,7 +214,7 @@ int main(int argc, char* argv[])
 		LCDClear();
 		if(ADC_result < no_item_value) no_item_value = ADC_result;
 		LCDWriteInt(no_item_value,4);
-		mTimer(500);
+		mTimer(10);
 	}
 	
 	#endif
@@ -210,71 +235,55 @@ int main(int argc, char* argv[])
 	ADC_result_flag = 0;
 
 	// Track sensor values
-	unsigned values[10];
 	unsigned current_value;
-	unsigned low_value;
-	unsigned high_value;
+	unsigned low_value = 0xFFFF;
+	unsigned high_value = 0x0000;
 
-	// Loop 4 times
-	for(int i = 0; i < 4; i++)
+	// Print info
+	LCDWriteStringXY(0,0,"Run Item 10x:");
+	
+	// Process 10 items
+	for(int j = 0; j < 10; j++)
 	{
-		// Output info to LCD
-		LCDClear();
-		switch(i)
-		{
-			case 0:
-				LCDWriteStringXY(0,0,"Steel");
-				break;
-			case 1:
-				LCDWriteStringXY(0,0,"Aluminium");
-				break;
-			case 2:
-				LCDWriteStringXY(0,0,"Black Plastic");
-				break;
-			case 3:
-				LCDWriteStringXY(0,0,"White Plastic");
-				break;
-			default:
-				LCDWriteStringXY(0,0,"Error");
-				break;
-		}
-
-		for(int j = 0; j < 10; j++)
-		{
-			// Wait for item
-			while(!inbound);
-			inbound = 0;
-	
-			// Start timer after recognizing item
-			TIFR3 |= _BV(OCF3A);
+		// Reset current value to bogus number
+		current_value = 1337;
 		
-			// Determine item value
-			while(!(TIFR3 & _BV(OCF3A)))
-			{
-				// Do a conversion; save result if less than current minimum
-				ADCSRA |= _BV(ADSC);
-				while(!ADC_result_flag);
-				ADC_result_flag = 0;
-				if(ADC_result < current_value) current_value = ADC_result;
-			}
+		// Wait for item
+		while(!inbound);
+		inbound = 0;
+		
+		// Indicate item seen
+		LCDWriteIntXY(14,0,(j+1),2);
+		
+		// Zero the timer
+		TCNT3 = 0x0000;
 	
-			// Add item value to array
-			values[j] = current_value;
-		}
-
-		// Print results
-		low_value = values[0];
-		high_value = low_value;
-		for(int j = 1; j < 10; j++)
+		// Start timer after recognizing item
+		TIFR3 |= _BV(OCF3A);
+		
+		// Determine item value
+		while(!(TIFR3 & _BV(OCF3A)))
 		{
-			if(values[j] < low_value) low_value = values[j];
-			if(values[j] > high_value) high_value = values[j];
+			// Do a conversion; save result if less than current minimum
+			ADCSRA |= _BV(ADSC);
+			while(!ADC_result_flag);
+			ADC_result_flag = 0;
+			if(ADC_result < current_value) current_value = ADC_result;
 		}
-		LCDWriteIntXY(0,1,low_value,4);
-		LCDWriteStringXY(5,1,"to");
-		LCDWriteIntXY(8,1,high_value,4);
-		mTimer(5000);
+		
+		// Save values
+		LCDWriteIntXY(6,1,current_value,4);
+		if(current_value < low_value) low_value = current_value;
+		if(current_value > high_value) high_value = current_value;
 	}
+
+	// Print results
+	LCDClear();
+	LCDWriteStringXY(0,0,"Results:");
+	LCDWriteIntXY(0,1,low_value,4);
+	LCDWriteStringXY(5,1,"to");
+	LCDWriteIntXY(8,1,high_value,4);
+	mTimer(5000);
 
 	return(0);
 	
@@ -284,6 +293,11 @@ int main(int argc, char* argv[])
 	#ifdef TIMER_CALIBRATION_MODE
 
 	sei();
+	
+	// Print info
+	LCDWriteStringXY(0,0,"TimerCalibration");
+	LCDWriteStringXY(0,1,"Items Seen:");
+	LCDWriteIntXY(14,1,0,2);
 
 	// Initialize ADC
 	ADCSRA |= _BV(ADSC);
@@ -303,6 +317,9 @@ int main(int argc, char* argv[])
 		while(!inbound);
 		TCNT3 = 0x0000;
 		TIFR3 |= _BV(OCF3A);
+		
+		// Indicate item seen
+		LCDWriteIntXY(14,1,(i+1),2);
 
 		// Time how long it takes for item to go through
 		ADCSRA |= _BV(ADSC);
@@ -312,15 +329,13 @@ int main(int argc, char* argv[])
 		// ADC result is greater than the no-item threshold,
 		// and it gets reset each time the ADC result is beneath
 		// this threshold. 
-		// no_item_time = 2000 corresponds to ~5ms no-item time
-		// no_item_time = 4000 corresponds to ~10ms no-item time
 		unsigned no_item_time = 0;
-		while(no_item_time < 4000)
+		while(no_item_time < NO_ITEM_TIME)
 		{
 			ADC_result_flag = 0;
 			ADCSRA |= _BV(ADSC);
 			while(!ADC_result_flag);
-			if(ADC_result >= NO_ITEM_THRESHOLD)
+			if(ADC_result >= NO_ITEM_THRESHOLD - AMBIENT_DEVIANCE)
 			{
 				no_item_time++;
 			}
@@ -399,6 +414,8 @@ int main(int argc, char* argv[])
 			LCDWriteIntXY(13,1,items_sorted,2);
 			while(!running);
 		}
+		
+		
 	}
 	
 	return(0);
