@@ -32,23 +32,33 @@
 #ifndef SENSOR_VALUES
 #define SENSOR_VALUES
 
-#define NO_ITEM_THRESHOLD	992
+#define NO_ITEM_THRESHOLD	1008
 
-#define STEEL_LOW			255
-#define STEEL_HIGH			527
+#define ALUMINIUM_LOW		39
+#define ALUMINIUM_HIGH		163
 
-#define ALUMINIUM_LOW		35
-#define ALUMINIUM_HIGH		48
+#define STEEL_LOW			494
+#define STEEL_HIGH			624
 
-#define BLACK_PLASTIC_LOW	931
-#define BLACK_PLASTIC_HIGH	952
-
-#define WHITE_PLASTIC_LOW	871
+#define WHITE_PLASTIC_LOW	876
 #define WHITE_PLASTIC_HIGH	896
+
+#define BLACK_PLASTIC_LOW	935
+#define BLACK_PLASTIC_HIGH	952
 
 // Time to run ADC conversions for upon seeing item
 // Divide by 125 to get value in ms
-#define STOPWATCH			25888
+#define STOPWATCH			20000
+
+// Synchronizes item rolling off belt with stepper
+// motor reaching end of motion
+#define ROLLOFF_DELAY		200
+
+// Additional delay for 180 degree turns
+#define HALF_TURN_DELAY		100
+
+// Additional delay for reversal
+#define REVERSAL_DELAY		150
 
 #endif
 
@@ -386,7 +396,7 @@ int main(int argc, char* argv[])
 	home();
 
 	// Stores ADC conversion result from sensor
-	unsigned current_value;
+	unsigned sensor_value;
 	
 	// Print info
 	LCDClear();
@@ -426,7 +436,7 @@ int main(int argc, char* argv[])
 			inbound = 0;
 			
 			// Reset current item value
-			current_value = 1337;
+			sensor_value = 1337;
 			
 			// Zero the timer
 			TCNT3 = 0x0000;
@@ -441,22 +451,22 @@ int main(int argc, char* argv[])
 				ADCSRA |= _BV(ADSC);
 				while(!ADC_result_flag);
 				ADC_result_flag = 0;
-				if(ADC_result < current_value) current_value = ADC_result;
+				if(ADC_result < sensor_value) sensor_value = ADC_result;
 			}
 			
 			// Add item to queue
 			initLink(&newItem);
-			if(current_value < (ALUMINIUM_HIGH + STEEL_LOW)/2)
+			if(sensor_value < (ALUMINIUM_HIGH + STEEL_LOW)/2)
 			{
 				newItem->itemType = 'a';
 				//LCDWriteStringXY(0,1,"Alum");
 			}
-			else if(current_value < (STEEL_HIGH + WHITE_PLASTIC_LOW)/2)
+			else if(sensor_value < (STEEL_HIGH + WHITE_PLASTIC_LOW)/2)
 			{
 				newItem->itemType = 's';
 				//LCDWriteStringXY(0,1,"Steel");
 			}
-			else if(current_value < (WHITE_PLASTIC_HIGH + BLACK_PLASTIC_LOW)/2)
+			else if(sensor_value < (WHITE_PLASTIC_HIGH + BLACK_PLASTIC_LOW)/2)
 			{
 				newItem->itemType = 'w';
 				//LCDWriteStringXY(0,1,"White");
@@ -616,119 +626,107 @@ void move(int c){
 }
 
 // This function moves the sorting bucket to a location based on part in list
-void sort(char item)
+int sort(char item)
 {
-	// Stop the belt
-	PORTL |= 0xFF;
-	
+	int recent_disk_direction = disk_direction;
 	switch(disk_location)
 	{
 		case 'b':
 		switch(item)
 		{
 			case 'b':
-			break;
+			return 0;
 			
 			case 'a':
 			disk_direction = 0;
 			move(QUARTER_TURN);
 			disk_location = 'a';
-			break;
+			return (disk_direction ^ recent_disk_direction) ? 3 : 1;
 			
 			case 's':
 			disk_direction = 1;
 			move(QUARTER_TURN);
 			disk_location = 's';
-			break;
+			return (disk_direction ^ recent_disk_direction) ? 3 : 1;
 			
 			case 'w':
 			move(HALF_TURN);
 			disk_location = 'w';
-			break;
+			return 2;
 		}
-		break;
 		
 		case 'a':
 		switch(item)
 		{
 			case 'a':
-			break;
+			return 0;
 			
 			case 'b':
 			disk_direction = 1;
 			move(QUARTER_TURN);
 			disk_location = 'b';
-			break;
+			return (disk_direction ^ recent_disk_direction) ? 3 : 1;
 			
 			case 's':
 			move(HALF_TURN);
 			disk_location = 's';
-			break;
+			return 2;
 			
 			case 'w':
 			disk_direction = 0;
 			move(QUARTER_TURN);
 			disk_location = 'w';
-			break;
+			return (disk_direction ^ recent_disk_direction) ? 3 : 1;
 		}
-		break;
 		
 		case 'w':
 		switch(item)
 		{
 			case 'w':
-			break;
+			return 0;
 			
 			case 'b':
 			move(HALF_TURN);
 			disk_location = 'b';
-			break;
+			return 2;
 			
 			case 'a':
 			disk_direction = 1;
 			move(QUARTER_TURN);
 			disk_location = 'a';
-			break;
+			return (disk_direction ^ recent_disk_direction) ? 3 : 1;
 			
 			case 's':
 			disk_direction = 0;
 			move(QUARTER_TURN);
 			disk_location = 's';
-			break;
+			return (disk_direction ^ recent_disk_direction) ? 3 : 1;
 		}
-		break;
 		
 		case 's':
 		switch(item)
 		{
 			case 's':
-			break;
+			return 0;
 			
 			case 'b':
 			disk_direction = 0;
 			move(QUARTER_TURN);
 			disk_location = 'b';
-			break;
+			return (disk_direction ^ recent_disk_direction) ? 3 : 1;
 			
 			case 'a':
 			move(HALF_TURN);
 			disk_location = 'a';
-			break;
+			return 2;
 			
 			case 'w':
 			disk_direction = 1;
 			move(QUARTER_TURN);
 			disk_location = 'w';
-			break;
+			return (disk_direction ^ recent_disk_direction) ? 3 : 1;
 		}
-		break;
 	}
-	
-	items_sorted++;
-	// dump item into bucket
-	
-	// Resume the belt
-	PORTL &= 0x7F;
 }
 
 // Function to test sorting of a list
@@ -938,17 +936,29 @@ ISR(INT4_vect)
 	}
 
 	// Move the stepper dish
-	sort(firstValue(&head));
-	//num_items--;
+	int n = sort(firstValue(&head));
+	num_items--;
 
 	// Remove the item from the queue
 	dequeue(&head, &tail, &oldItem);
 
 	// Deallocate item
 	destroyLink(&oldItem);
+	
+	// 180 degree delay
+	if(n==2) mTimer(ROLLOFF_DELAY);
+	
+	// Direction reversal delay
+	if(n==3) mTimer(REVERSAL_DELAY);
 
 	// Resume the belt
 	PORTL &= 0x7F;
+	
+	// Allow item to roll off the belt
+	mTimer(ROLLOFF_DELAY);
+	
+	// Print info
+	LCDWriteIntXY(14,0,num_items,2);
 }
 
 // First sensor trigger
