@@ -14,7 +14,7 @@
 
 void home();
 void move(int c);
-void sort(char list_item);
+int sort(char list_item);
 void print_results();
 	
 
