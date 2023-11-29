@@ -10,8 +10,9 @@
 # REVISED ############################################*/
 
 //#define PRECALIBRATION_MODE
-//#define CALIBRATION_MODE
 //#define TIMER_CALIBRATION_MODE
+//#define EXIT_CALIBRATION_MODE
+//#define CALIBRATION_MODE
 
 #ifdef TIMER_CALIBRATION_MODE
 
@@ -25,26 +26,33 @@
 
 // Deviance from NO_ITEM_THRESHOLD that can
 // still be counted as no-item status
-#define AMBIENT_DEVIANCE	7
+#define AMBIENT_DEVIANCE	8
+
+#endif
+
+#ifdef EXIT_CALIBRATION_MODE
+
+// Tracks whether an item has been double-counted
+volatile int is_double_count = 0;
 
 #endif
 
 #ifndef SENSOR_VALUES
 #define SENSOR_VALUES
 
-#define NO_ITEM_THRESHOLD	1008
+#define NO_ITEM_THRESHOLD	1006
 
-#define ALUMINIUM_LOW		39
-#define ALUMINIUM_HIGH		163
+#define ALUMINIUM_LOW		24
+#define ALUMINIUM_HIGH		31
 
-#define STEEL_LOW			494
-#define STEEL_HIGH			624
+#define STEEL_LOW			451
+#define STEEL_HIGH			655
 
-#define WHITE_PLASTIC_LOW	876
+#define WHITE_PLASTIC_LOW	867
 #define WHITE_PLASTIC_HIGH	896
 
-#define BLACK_PLASTIC_LOW	935
-#define BLACK_PLASTIC_HIGH	952
+#define BLACK_PLASTIC_LOW	931
+#define BLACK_PLASTIC_HIGH	960
 
 // Time to run ADC conversions for upon seeing item
 // Divide by 125 to get value in ms
@@ -59,6 +67,10 @@
 
 // Additional delay for reversal
 #define REVERSAL_DELAY		150
+
+// Minimum period between exit interrupts, divide
+// by 125 to get get value in ms
+#define EXIT_DELAY			2500
 
 #endif
 
@@ -144,6 +156,25 @@ int main(int argc, char* argv[])
 	// LED Debug Bank
 	DDRK = 0xFF;
 	DDRF = 0xC0;
+	
+	// Set timer 4 (exit timer) to CTC mode
+	TCCR4B |= _BV(WGM42);
+	
+	// Set timer 4 clock prescaler to 1/64
+	// ->125kHz effective speed
+	TCCR4B |= _BV(CS41) | _BV(CS40);
+	
+	#ifndef EXIT_CALIBRATION_MODE
+	
+	// Set timer 4 TOP value calibrated delay
+	OCR4A = EXIT_DELAY;
+	
+	#else
+	
+	// Set timer 4 TOP value to MAX
+	OCR4A = 0xFFFF;
+	
+	#endif
 	
 	// Set timer 3 to CTC mode
 	TCCR3B |= _BV(WGM32);
@@ -911,7 +942,35 @@ ISR(INT3_vect)
 
 // End of conveyor belt interrupt
 ISR(INT4_vect)
-{
+{	
+	#ifndef EXIT_CALIBRATION_MODE
+	
+	// Mask this interrupt
+	EIMSK &= ~_BV(INT4);
+	
+	#else
+	
+	// Capture timer value
+	unsigned double_count_time = TCNT4;
+	
+	// If double-count, print time between counts
+	if(is_double_count)
+	{
+		LCDClear();
+		LCDWriteStringXY(1,0,"DOUBLE TROUBLE");
+		LCDWriteIntXY(5,1,double_count_time,5);
+		mTimer(2000);
+	}
+	else
+	{
+		LCDClear();
+		LCDWriteStringXY(0,0,"Sorting...");
+		LCDWriteIntXY(14,0,num_items,2);
+		is_double_count = 1;
+	}
+	
+	#endif
+	
 	// Stop the belt
 	PORTL |= 0xFF;
 	
@@ -959,6 +1018,11 @@ ISR(INT4_vect)
 	
 	// Print info
 	LCDWriteIntXY(14,0,num_items,2);
+	
+	// Start the exit timer and enable its interrupt
+	TCNT4 = 0x0000;
+	TIFR4 |= _BV(OCF4A);
+	TIMSK4 |= _BV(OCIE4A);
 }
 
 // First sensor trigger
@@ -966,7 +1030,25 @@ ISR(INT5_vect)
 {
 	inbound = 1;
 }
+
+// Exit timer interrupt
+ISR(TIMER4_COMPA_vect)
+{
+	// Mask this interrupt
+	TIMSK4 &= ~_BV(OCIE4A);
 	
+	#ifndef EXIT_CALIBRATION_MODE
+	
+	// Enable exit sensor interrupt
+	EIMSK |= _BV(INT4);
+	
+	#else
+	
+	// Not a double-count if this timer maxes out
+	is_double_count = 0;
+	
+	#endif
+}
 
 // ISR for ADC Conversion Completion
 ISR(ADC_vect)
