@@ -22,7 +22,7 @@
 // NO_ITEM_TIME 2000 corresponds to ~5ms no-item time
 // NO_ITEM_TIME 4000 corresponds to ~10ms no-item time
 // etc.
-#define NO_ITEM_TIME		8000
+#define NO_ITEM_TIME		5000
 
 // Deviance from NO_ITEM_THRESHOLD that can
 // still be counted as no-item status
@@ -40,37 +40,43 @@ volatile int is_double_count = 0;
 #ifndef SENSOR_VALUES
 #define SENSOR_VALUES
 
-#define NO_ITEM_THRESHOLD	1006
+#define NO_ITEM_THRESHOLD	1008
 
 #define ALUMINIUM_LOW		24
 #define ALUMINIUM_HIGH		31
 
-#define STEEL_LOW			451
-#define STEEL_HIGH			655
+#define STEEL_LOW			524
+#define STEEL_HIGH			688
 
-#define WHITE_PLASTIC_LOW	867
-#define WHITE_PLASTIC_HIGH	896
+#define WHITE_PLASTIC_LOW	865
+#define WHITE_PLASTIC_HIGH	899
 
-#define BLACK_PLASTIC_LOW	931
-#define BLACK_PLASTIC_HIGH	960
+#define BLACK_PLASTIC_LOW	940
+#define BLACK_PLASTIC_HIGH	966
+
+// Belt speed as percentage of maximum speed
+#define BELT_SPEED 49
 
 // Time to run ADC conversions for upon seeing item
 // Divide by 125 to get value in ms
-#define STOPWATCH			20000
+#define STOPWATCH			6525
 
 // Synchronizes item rolling off belt with stepper
 // motor reaching end of motion
-#define ROLLOFF_DELAY		200
+#define ROLLOFF_DELAY		160
 
-// Additional delay for 180 degree turns
+// Additional delay for 180 degree turns in ms
 #define HALF_TURN_DELAY		100
 
-// Additional delay for reversal
-#define REVERSAL_DELAY		150
+// Additional delay for reversal in ms
+#define REVERSAL_DELAY		220
+
+// Additional delay for no turn in ms
+#define NO_TURN_DELAY		20
 
 // Minimum period between exit interrupts, divide
 // by 125 to get get value in ms
-#define EXIT_DELAY			2500
+#define EXIT_DELAY			4000
 
 #endif
 
@@ -210,7 +216,7 @@ int main(int argc, char* argv[])
 	TCCR0A |= _BV(WGM01) | _BV(WGM00);
 	
 	// Set initial duty cycle
-	OCR0A = 96;
+	OCR0A = BELT_SPEED * 255 / 100;
 	
 	// Clear OC0A on Compare Match, set OC0A at BOTTOM
 	TCCR0A |= _BV(COM0A1);
@@ -399,9 +405,14 @@ int main(int argc, char* argv[])
 		if(timer_values[i] > high_value) high_value = timer_values[i];
 	}
 	LCDClear();
+	/*
 	LCDWriteIntXY(0,0,low_value,5);
 	LCDWriteStringXY(6,0,"to");
 	LCDWriteIntXY(10,0,high_value,5);
+	*/
+	LCDWriteStringXY(0,0,"Recommended");
+	LCDWriteStringXY(0,1,"value:");
+	LCDWriteIntXY(7,1,((low_value - NO_ITEM_TIME)/2),4);
 	mTimer(5000);
 
 	return(0);
@@ -1003,6 +1014,9 @@ ISR(INT4_vect)
 
 	// Deallocate item
 	destroyLink(&oldItem);
+	
+	// No turn delay
+	if(n==0) mTimer(NO_TURN_DELAY);
 	
 	// 180 degree delay
 	if(n==2) mTimer(ROLLOFF_DELAY);
