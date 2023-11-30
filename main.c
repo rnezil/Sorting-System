@@ -40,26 +40,26 @@ volatile int is_double_count = 0;
 #ifndef SENSOR_VALUES
 #define SENSOR_VALUES
 
-#define NO_ITEM_THRESHOLD	1008
+#define NO_ITEM_THRESHOLD	992
 
-#define ALUMINIUM_LOW		24
-#define ALUMINIUM_HIGH		31
+#define ALUMINIUM_LOW		62		//79
+#define ALUMINIUM_HIGH		255		//334
 
-#define STEEL_LOW			524
-#define STEEL_HIGH			688
+#define STEEL_LOW			511		//463
+#define STEEL_HIGH			671		//620
 
-#define WHITE_PLASTIC_LOW	865
-#define WHITE_PLASTIC_HIGH	899
+#define WHITE_PLASTIC_LOW	880		//899
+#define WHITE_PLASTIC_HIGH	899		//984
 
-#define BLACK_PLASTIC_LOW	940
-#define BLACK_PLASTIC_HIGH	966
+#define BLACK_PLASTIC_LOW	927		//920
+#define BLACK_PLASTIC_HIGH	942
 
 // Belt speed as percentage of maximum speed
-#define BELT_SPEED 49
+#define BELT_SPEED 38		//49
 
 // Time to run ADC conversions for upon seeing item
 // Divide by 125 to get value in ms
-#define STOPWATCH			6525
+#define STOPWATCH			5805	//6525
 
 // Synchronizes item rolling off belt with stepper
 // motor reaching end of motion
@@ -209,7 +209,8 @@ int main(int argc, char* argv[])
 	
 	// Enable automatic interrupt firing after each completed conversion
 	ADCSRA |= _BV(ADIE);
-	
+	// For Reillys board	
+	ADMUX |=_BV(REFS0);
 	// Set waveform generation mode to Fast PWM
 	// with TOP = OCR0A, update OCRA at TOP, set
 	// TOV at MAX
@@ -232,7 +233,7 @@ int main(int argc, char* argv[])
 	
 	// Set INT0 to any edge mode (kill switch)
 	// Set INT1 to rising edge mode (pause resume)
-	EICRA |= _BV(ISC00) | _BV(ISC11);
+	EICRA |= _BV(ISC00) | _BV(ISC10);
 	EIMSK |= _BV(INT0) | _BV(INT1);
 	
 	// Precalibration mode: determine sensor value for
@@ -575,7 +576,7 @@ void home(){
 		}
 		
 		PORTA = stepper[position];
-		mTimer(20);
+		mTimer(11);
 		position++;
 		if(position == 4){
 			position = 0;
@@ -919,6 +920,12 @@ ISR(INT0_vect)
 // Pause/resume conveyor belt ISR
 ISR(INT1_vect)
 {
+	if(PIND & (1 << PIND1) == 0x02){		// Trips on button press
+		mTimer(20);
+		while(PIND & (1 << PIND1) == 0x02){		// Waits for button release
+			mTimer(20);
+		}
+	}
 	// Brake high + debounce
 	PORTL |= 0xF0;
 	mTimer(25);
