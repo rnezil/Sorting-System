@@ -920,20 +920,13 @@ ISR(INT0_vect)
 // Pause/resume conveyor belt ISR
 ISR(INT1_vect)
 {
-	if(PIND & (1 << PIND1) == 0x02){		// Trips on button press
-		mTimer(20);
-		while(PIND & (1 << PIND1) == 0x02){		// Waits for button release
-			mTimer(20);
-		}
-	}
-	// Brake high + debounce
-	PORTL |= 0xF0;
-	mTimer(25);
+	// Debounce
+	while(PIND 7 0x02) mTimer(20);
 	
 	if( running )
 	{
 		// Pause
-		PORTL &= 0xFF;
+		PORTL |= 0xF0;
 		running = 0;
 	}
 	else
@@ -990,7 +983,7 @@ ISR(INT4_vect)
 	#endif
 	
 	// Stop the belt
-	PORTL |= 0xFF;
+	PORTL |= 0xF0;
 	
 	// Print info
 	switch(firstValue(&head))
