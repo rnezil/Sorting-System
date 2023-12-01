@@ -9,77 +9,6 @@
 # DATA
 # REVISED ############################################*/
 
-//#define PRECALIBRATION_MODE
-//#define TIMER_CALIBRATION_MODE
-//#define EXIT_CALIBRATION_MODE
-//#define CALIBRATION_MODE
-
-#ifdef TIMER_CALIBRATION_MODE
-
-// Determines how long reflective sensor must pick up
-// readings above the no-item threshold before item
-// processing can be completed.
-// NO_ITEM_TIME 2000 corresponds to ~5ms no-item time
-// NO_ITEM_TIME 4000 corresponds to ~10ms no-item time
-// etc.
-#define NO_ITEM_TIME		5000
-
-// Deviance from NO_ITEM_THRESHOLD that can
-// still be counted as no-item status
-#define AMBIENT_DEVIANCE	8
-
-#endif
-
-#ifdef EXIT_CALIBRATION_MODE
-
-// Tracks whether an item has been double-counted
-volatile int is_double_count = 0;
-
-#endif
-
-#ifndef SENSOR_VALUES
-#define SENSOR_VALUES
-
-#define NO_ITEM_THRESHOLD	992
-
-#define ALUMINIUM_LOW		62		//79
-#define ALUMINIUM_HIGH		255		//334
-
-#define STEEL_LOW			511		//463
-#define STEEL_HIGH			671		//620
-
-#define WHITE_PLASTIC_LOW	880		//899
-#define WHITE_PLASTIC_HIGH	899		//984
-
-#define BLACK_PLASTIC_LOW	927		//920
-#define BLACK_PLASTIC_HIGH	942
-
-// Belt speed as percentage of maximum speed
-#define BELT_SPEED 38		//49
-
-// Time to run ADC conversions for upon seeing item
-// Divide by 125 to get value in ms
-#define STOPWATCH			5805	//6525
-
-// Synchronizes item rolling off belt with stepper
-// motor reaching end of motion
-#define ROLLOFF_DELAY		160
-
-// Additional delay for 180 degree turns in ms
-#define HALF_TURN_DELAY		100
-
-// Additional delay for reversal in ms
-#define REVERSAL_DELAY		220
-
-// Additional delay for no turn in ms
-#define NO_TURN_DELAY		20
-
-// Minimum period between exit interrupts, divide
-// by 125 to get get value in ms
-#define EXIT_DELAY			4000
-
-#endif
-
 #include <avr/interrupt.h>
 #include <avr/io.h>
 #include <stdlib.h>
@@ -87,42 +16,63 @@ volatile int is_double_count = 0;
 #include "stepper.h"
 #include "LinkedQueue.h"
 
-// Note: interrupts have priority. INT0 is top priority
-// external interrupt, INT7 is lowest priority external
-// interrupt. Interrupt priority is used to determine
-// which interrupt will be serviced first if both fire
-// at the same time. You can only have ONE pending
-// interrupt PER interrupt, i.e. you cannot have two
-// INT0's pending at the same time. However, you CAN
-// have multiple different interrupts pending, i.e. you
-// could have INT1 INT2 and INT3 all pending at the same
-// time while INT0 is being serviced.
+//#define PRECALIBRATION_MODE
+//#define TIMER_CALIBRATION_MODE
+//#define EXIT_CALIBRATION_MODE
+//#define CALIBRATION_MODE
 
-// Stores ADC conversion result
+#ifndef SYSTEM_PARAMETERS
+#define SYSTEM_PARMETERS
+
+#define NO_ITEM_THRESHOLD	992
+#define ALUMINIUM_MAX		255
+#define STEEL_MAX		750
+#define WHITE_PLASTIC_MAX	900
+#define BELT_SPEED		38
+
+// Time to run ADC conversions for upon seeing item
+// Divide by 125 to get value in ms
+#define STOPWATCH		5805
+
+// Additional delays for stepper synchronization
+#define ROLLOFF_DELAY		160
+#define HALF_TURN_DELAY		100
+#define REVERSAL_DELAY		220
+#define NO_TURN_DELAY		20
+
+// Minimum period between exit interrupts, divide
+// by 125 to get get value in ms
+#define EXIT_DELAY		4000
+
+#endif
+
+#ifdef TIMER_CALIBRATION_MODE
+
+#define NO_ITEM_TIME		5000
+#define AMBIENT_DEVIANCE	8
+
+#endif
+
+#ifdef EXIT_CALIBRATION_MODE
+
+volatile int is_double_count = 0;
+
+#endif
+
+// ADC conversion result
 volatile unsigned int ADC_result;
 
-// Indicates ADC has completed a conversion
+// State
 volatile int ADC_result_flag = 0;
-
-// Indicates item has reached first optical sensor
 volatile int inbound = 0;
-
-// Indicates whether conveyor belt is running
 volatile int running = 1;
-
-// Indicates whether system is in ramp-down mode
 volatile int ramp_down = 0;
 
-// Tracks number of items sorted
+// Item tracking
 volatile unsigned int plastic = 0;
 volatile unsigned int steel = 0;
 volatile unsigned int alum = 0;
-
-// Track size of queue
 volatile int num_items = 0;
-	
-// Make queue head and tail global so that it can be
-// accessed by ISR's
 volatile link* head;
 volatile link* tail;
 volatile link* oldItem;
@@ -132,100 +82,53 @@ void mTimer(int count);
 
 int main(int argc, char* argv[])
 {	
-	// Reduce clock rate from 16MHz to 8MHz
+	// Initialize clock, LCD and queue
 	CLKPR = 0x80;
 	CLKPR = 0x01;
-	
-	// Initialize display
 	InitLCD(LS_BLINK|LS_ULINE);
-
-	// Clear the screen
 	LCDClear();
-
-	// Prepare the queue
 	link* newItem;
 	setup(&head, &tail);
 		
-	// PWM Out
+	// IO
 	DDRB = 0x80;
-	
-	// DC Motor
 	DDRL = 0xF0;
 	PORTL |= 0x70;
-	
-	// Stepper Motor
 	DDRA = 0xFF;
-	
-	// LCD Display
 	DDRC = 0xFF;
-	
-	// LED Debug Bank
 	DDRK = 0xFF;
 	DDRF = 0xC0;
 	
-	// Set timer 4 (exit timer) to CTC mode
+	// Set exit timer to CTC mode, 125kHz
 	TCCR4B |= _BV(WGM42);
-	
-	// Set timer 4 clock prescaler to 1/64
-	// ->125kHz effective speed
 	TCCR4B |= _BV(CS41) | _BV(CS40);
 	
+	// Minimum time between exit interrupts
 	#ifndef EXIT_CALIBRATION_MODE
-	
-	// Set timer 4 TOP value calibrated delay
 	OCR4A = EXIT_DELAY;
-	
 	#else
-	
-	// Set timer 4 TOP value to MAX
 	OCR4A = 0xFFFF;
-	
 	#endif
 	
-	// Set timer 3 to CTC mode
+	// Set ADC conversion timer to CTC mode, 125kHz
 	TCCR3B |= _BV(WGM32);
-	
-	// Set timer 3 clock prescaler to 1/64
-	// -> timer 3 runs at 8MHz/64 = 125kHz
-	// -> timer period = 0.52s
 	TCCR3B |= _BV(CS31) | _BV(CS30);
-	
-	// Set clock prescaler for timer 1B to 1/8
 	TCCR1B |= _BV(CS11);
-	
-	// Set based on timer calibration results
 	#ifdef TIMER_CALIBRATION_MODE
-	
 	OCR3A = 0xFFFF;
-	
 	#else
-	
 	OCR3A = STOPWATCH;
-	
 	#endif
 	
-	// Enable ADC
+	// Enable ADC with automatic interrupts after conversion success
 	ADCSRA |= _BV(ADEN);
-	
-	// Enable automatic interrupt firing after each completed conversion
 	ADCSRA |= _BV(ADIE);
-	// For Reillys board	
 	ADMUX |=_BV(REFS0);
-	// Set waveform generation mode to Fast PWM
-	// with TOP = OCR0A, update OCRA at TOP, set
-	// TOV at MAX
+	
+	// 3.9kHz PWM
 	TCCR0A |= _BV(WGM01) | _BV(WGM00);
-	
-	// Set initial duty cycle
 	OCR0A = BELT_SPEED * 255 / 100;
-	
-	// Clear OC0A on Compare Match, set OC0A at BOTTOM
 	TCCR0A |= _BV(COM0A1);
-	
-	// Set timer prescaler
-	// 256 ticks per in a period
-	// 8MHz/256 = 31.25KHz cycle w/ no prescaling
-	// Therefore want prescaling of 1/8 to get 3.9KHz
 	TCCR0B |= _BV(CS01);
 	
 	// Enter uninterruptable command sequence
@@ -236,26 +139,14 @@ int main(int argc, char* argv[])
 	EICRA |= _BV(ISC00) | _BV(ISC10);
 	EIMSK |= _BV(INT0) | _BV(INT1);
 	
-	// Precalibration mode: determine sensor value for
-	// no-item case
+	// Do continuous ADC conversions and keep smallest value on screen
 	#ifdef PRECALIBRATION_MODE
-	
-	// Last result: 992
-	
 	sei();
-	
-	// Initialize ADC
 	ADCSRA |= _BV(ADSC);
 	while(!ADC_result_flag);
 	ADC_result_flag = 0;
-	
-	// Give it a second or two
 	mTimer(2000);
-	
-	// Determine the lowest value
 	unsigned no_item_value = 0xFFFF;
-
-	// Print values
 	while(1)
 	{
 		ADCSRA |= _BV(ADSC);
@@ -266,119 +157,70 @@ int main(int argc, char* argv[])
 		LCDWriteInt(no_item_value,4);
 		mTimer(10);
 	}
-	
 	#endif
 
 	// Set INT5 to rising edge mode (first optical sensor)
 	EICRB |= _BV(ISC51) | _BV(ISC50);
 	EIMSK |= _BV(INT5);
 	
-	// Calibrate system: run each type through 10 times, take 
-	// the range of the minimums of each piece
+	// Run item through sensors 12 times and print minimum and maximum values
 	#ifdef CALIBRATION_MODE
-	
 	sei();
-	
-	// Initialize ADC
 	ADCSRA |= _BV(ADSC);
 	while(!ADC_result_flag);
 	ADC_result_flag = 0;
-
-	// Track sensor values
 	unsigned current_value;
 	unsigned low_value = 0xFFFF;
 	unsigned high_value = 0x0000;
-
-	// Print info
-	LCDWriteStringXY(0,0,"Run Item 10x:");
-	
-	// Process 10 items
-	for(int j = 0; j < 10; j++)
+	LCDWriteStringXY(0,0,"Run Item 12x:");
+	for(int j = 0; j < 12; j++)
 	{
-		// Reset current value to bogus number
 		current_value = 1337;
-		
-		// Wait for item
 		while(!inbound);
 		inbound = 0;
-		
-		// Indicate item seen
 		LCDWriteIntXY(14,0,(j+1),2);
-		
-		// Zero the timer
 		TCNT3 = 0x0000;
-	
-		// Start timer after recognizing item
 		TIFR3 |= _BV(OCF3A);
-		
-		// Determine item value
 		while(!(TIFR3 & _BV(OCF3A)))
 		{
-			// Do a conversion; save result if less than current minimum
 			ADCSRA |= _BV(ADSC);
 			while(!ADC_result_flag);
 			ADC_result_flag = 0;
 			if(ADC_result < current_value) current_value = ADC_result;
 		}
-		
-		// Save values
 		LCDWriteIntXY(6,1,current_value,4);
 		if(current_value < low_value) low_value = current_value;
 		if(current_value > high_value) high_value = current_value;
 	}
-
-	// Print results
 	LCDClear();
 	LCDWriteStringXY(0,0,"Results:");
 	LCDWriteIntXY(0,1,low_value,4);
 	LCDWriteStringXY(5,1,"to");
 	LCDWriteIntXY(8,1,high_value,4);
 	mTimer(5000);
-
 	return(0);
-	
 	#endif
 
 	// Determine how long it takes for an item to go through the sensor
 	#ifdef TIMER_CALIBRATION_MODE
-
 	sei();
-	
-	// Print info
 	LCDWriteStringXY(0,0,"TimerCalibration");
 	LCDWriteStringXY(0,1,"Items Seen:");
 	LCDWriteIntXY(14,1,0,2);
-
-	// Initialize ADC
 	ADCSRA |= _BV(ADSC);
 	while(!ADC_result_flag);
 	ADC_result_flag = 0;
-	
-	// Give it a second
 	mTimer(1000);
-
-	// Store timer values
 	unsigned timer_values[10]; 
-
 	for(int i = 0; i < 10; i++)
 	{
-		// Start the timer
 		inbound = 0;
 		while(!inbound);
 		TCNT3 = 0x0000;
 		TIFR3 |= _BV(OCF3A);
-		
-		// Indicate item seen
 		LCDWriteIntXY(14,1,(i+1),2);
-
-		// Time how long it takes for item to go through
 		ADCSRA |= _BV(ADSC);
 		while(!ADC_result_flag);
-		
-		// no_item_time gets incremented for each time the
-		// ADC result is greater than the no-item threshold,
-		// and it gets reset each time the ADC result is beneath
-		// this threshold. 
 		unsigned no_item_time = 0;
 		while(no_item_time < NO_ITEM_TIME)
 		{
@@ -396,8 +238,6 @@ int main(int argc, char* argv[])
 		}
 		timer_values[i] = TCNT3;
 	}
-
-	// Print results
 	unsigned low_value = timer_values[0];
 	unsigned high_value = low_value;
 	for(int i = 1; i < 10; i++)
@@ -415,9 +255,7 @@ int main(int argc, char* argv[])
 	LCDWriteStringXY(0,1,"value:");
 	LCDWriteIntXY(7,1,((low_value - NO_ITEM_TIME)/2),4);
 	mTimer(5000);
-
 	return(0);
-
 	#endif
 	
 	// Set INT2 to falling edge mode (homing sensor)
@@ -426,24 +264,18 @@ int main(int argc, char* argv[])
 	EICRA |= _BV(ISC21) | _BV(ISC31);
 	EICRB |= _BV(ISC41);
 	EIMSK |= _BV(INT2) | _BV(INT3) | _BV(INT4);
-	
-	// Exit uninterruptable command sequence
 	sei();
 	
-	// Initialize ADC
+	// Prepare ADC, stepper and LCD
 	ADCSRA |= _BV(ADSC);
 	while(!ADC_result_flag);
 	ADC_result_flag = 0;
-	
-	// Home the stepper
 	home();
-
-	// Stores ADC conversion result from sensor
 	unsigned sensor_value;
-	
-	// Print info
 	LCDClear();
 	LCDWriteStringXY(0,0,"Sorting...");
+
+	// Main loop
 	while(1)
 	{	
 		// If ramp-down mode is active, wait for currently enqueued items to
@@ -459,32 +291,28 @@ int main(int argc, char* argv[])
 			return(0);
 		}
 		
+		// If paused, print sorting info
 		if(!running)
 		{
 			LCDClear();
-			LCDWriteStringXY(0,0, "S:");
-			LCDWriteIntXY(2,0,steel,2);
-			LCDWriteStringXY(4,0, ", A:");
-			LCDWriteIntXY(8,0,alum,2);
-			LCDWriteStringXY(10,0, ", P:");
-			LCDWriteIntXY(14,0,plastic,2);
-			LCDWriteStringXY(0,1, "Items Sorted: ");
-			LCDWriteIntXY(13,1,items_sorted,2);
+			LCDWriteStringXY(0,1, "S:");
+			LCDWriteIntXY(2,1,steel,2);
+			LCDWriteStringXY(4,1, ", A:");
+			LCDWriteIntXY(8,1,alum,2);
+			LCDWriteStringXY(10,1, ", P:");
+			LCDWriteIntXY(14,1,plastic,2);
+			LCDWriteStringXY(0,0, "Items Sorted:");
+			LCDWriteIntXY(14,0,items_sorted,2);
 			while(!running);
 		}
 		
+		// Process item in front of reflective sensor
 		if(inbound)
 		{
-			// Reset inbound status
+			// Reset values and start timer
 			inbound = 0;
-			
-			// Reset current item value
 			sensor_value = 1337;
-			
-			// Zero the timer
 			TCNT3 = 0x0000;
-			
-			// Start timer after recognizing item
 			TIFR3 |= _BV(OCF3A);
 			
 			// Determine item value
@@ -528,26 +356,19 @@ int main(int argc, char* argv[])
 	return(0);
 }
 
+// Delay for 'count' milliseconds
 void mTimer(int count)
 {
-	// Initialize ms counter variable to zero
+	// Set timer to CTC mode at 1MHz with TOP = 1000
 	int i = 0;
-	
-	// Set timer 1B to CTC compare
 	TCCR1B |= _BV(WGM12);
-	
-	// Set TOP value for CTC comparison
 	OCR1A = 0x03E8;
-	
-	// Set COUNT to zero
 	TCNT1 = 0x0000;
-	
-	// Clear interrupt flag and start timer
 	TIFR1 |= _BV(OCF1A);
-	
+
+	// Count to 1000 at 1MHz 'count' times
 	while(i < count)
 	{
-		// If flag set, increment counter and clear flag
 		if(TIFR1 & 0x02)
 		{
 			TIFR1 |= _BV(OCF1A);
@@ -564,14 +385,14 @@ void home(){
 		if(!running)
 		{
 			LCDClear();
-			LCDWriteStringXY(0,0, "S:");
-			LCDWriteIntXY(2,0,steel,2);
-			LCDWriteStringXY(4,0, ", A:");
-			LCDWriteIntXY(8,0,alum,2);
-			LCDWriteStringXY(10,0, ", P:");
-			LCDWriteIntXY(14,0,plastic,2);
-			LCDWriteStringXY(0,1, "Items Sorted: ");
-			LCDWriteIntXY(13,1,items_sorted,2);
+			LCDWriteStringXY(0,1, "S:");
+			LCDWriteIntXY(2,1,steel,2);
+			LCDWriteStringXY(4,1, ", A:");
+			LCDWriteIntXY(8,1,alum,2);
+			LCDWriteStringXY(10,1, ", P:");
+			LCDWriteIntXY(14,1,plastic,2);
+			LCDWriteStringXY(0,1, "Items Sorted:");
+			LCDWriteIntXY(14,0,items_sorted,2);
 			while(!running);
 		}
 		
@@ -582,11 +403,6 @@ void home(){
 			position = 0;
 		}
 	}
-	
-	LCDWriteStringXY(0,0,"Disk homed Black");	// Can be removed after testing
-//	LCDWriteStringXY(0,1,"Position: ");
-//	LCDWriteIntXY(11,1,position,2);
-	mTimer(1000);
 }
 
 
@@ -599,14 +415,14 @@ void move(int c){
 			if(!running)
 			{
 				LCDClear();
-				LCDWriteStringXY(0,0, "S:");
-				LCDWriteIntXY(2,0,steel,2);
-				LCDWriteStringXY(4,0, ", A:");
-				LCDWriteIntXY(8,0,alum,2);
-				LCDWriteStringXY(10,0, ", P:");
-				LCDWriteIntXY(14,0,plastic,2);
-				LCDWriteStringXY(0,1, "Items Sorted: ");
-				LCDWriteIntXY(13,1,items_sorted,2);
+				LCDWriteStringXY(0,1, "S:");
+				LCDWriteIntXY(2,1,steel,2);
+				LCDWriteStringXY(4,1, ", A:");
+				LCDWriteIntXY(8,1,alum,2);
+				LCDWriteStringXY(10,1, ", P:");
+				LCDWriteIntXY(14,1,plastic,2);
+				LCDWriteStringXY(0,1, "Items Sorted:");
+				LCDWriteIntXY(14,0,items_sorted,2);
 				while(!running);
 			}
 			
@@ -635,14 +451,14 @@ void move(int c){
 			if(!running)
 			{
 				LCDClear();
-				LCDWriteStringXY(0,0, "S:");
-				LCDWriteIntXY(2,0,steel,2);
-				LCDWriteStringXY(4,0, ", A:");
-				LCDWriteIntXY(8,0,alum,2);
-				LCDWriteStringXY(10,0, ", P:");
-				LCDWriteIntXY(14,0,plastic,2);
-				LCDWriteStringXY(0,1, "Items Sorted: ");
-				LCDWriteIntXY(13,1,items_sorted,2);
+				LCDWriteStringXY(0,1, "S:");
+				LCDWriteIntXY(2,1,steel,2);
+				LCDWriteStringXY(4,1, ", A:");
+				LCDWriteIntXY(8,1,alum,2);
+				LCDWriteStringXY(10,1, ", P:");
+				LCDWriteIntXY(14,1,plastic,2);
+				LCDWriteStringXY(0,1, "Items Sorted:");
+				LCDWriteIntXY(14,0,items_sorted,2);
 				while(!running);
 			}
 			
@@ -921,7 +737,7 @@ ISR(INT0_vect)
 ISR(INT1_vect)
 {
 	// Debounce
-	while(PIND 7 0x02) mTimer(20);
+	while(PIND & 0x02) mTimer(20);
 	
 	if( running )
 	{
@@ -934,6 +750,9 @@ ISR(INT1_vect)
 		// Resume
 		PORTL &= 0x7F;
 		running = 1;
+		LCDClear();
+		LCDWriteStringXY(0,0,"Sorting...");
+		LCDWriteIntXY(14,0,num_items,2);
 	}
 }
 
@@ -948,7 +767,14 @@ ISR(INT2_vect)
 // Ramp down interrupt
 ISR(INT3_vect)
 {
-	ramp_down = 1;
+	if(!ramp_down)
+	{
+		// Set ramp down timer to CTC mode at 31.25kHz
+		TCCR5B |= _BV(WGM52);
+		TCCR5B |= _BV(CS52);
+		OCR5A = 0xFFFF;
+		ramp_down = 1;
+	}
 }
 
 // End of conveyor belt interrupt
@@ -990,18 +816,22 @@ ISR(INT4_vect)
 	{
 		case 'a':
 		LCDWriteStringXY(0,1,"Aluminium       ");
+		alum++;
 		break;
 		
 		case 's':
 		LCDWriteStringXY(0,1,"Steel           ");
+		steel++;
 		break;
 		
 		case 'b':
 		LCDWriteStringXY(0,1,"Black Plastic   ");
+		plastic++;
 		break;
 		
 		case 'w':
 		LCDWriteStringXY(0,1,"White Plastic   ");
+		plastic++;
 		break;
 	}
 
@@ -1011,17 +841,11 @@ ISR(INT4_vect)
 
 	// Remove the item from the queue
 	dequeue(&head, &tail, &oldItem);
-
-	// Deallocate item
 	destroyLink(&oldItem);
 	
-	// No turn delay
+	// Delay appropriately
 	if(n==0) mTimer(NO_TURN_DELAY);
-	
-	// 180 degree delay
 	if(n==2) mTimer(ROLLOFF_DELAY);
-	
-	// Direction reversal delay
 	if(n==3) mTimer(REVERSAL_DELAY);
 
 	// Resume the belt
