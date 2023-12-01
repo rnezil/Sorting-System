@@ -23,40 +23,26 @@
 
 #ifndef SYSTEM_PARAMETERS
 #define SYSTEM_PARMETERS
-
-#define NO_ITEM_THRESHOLD	992
-#define ALUMINIUM_MAX		255
-#define STEEL_MAX		750
-#define WHITE_PLASTIC_MAX	900
-#define BELT_SPEED		38
-
-// Time to run ADC conversions for upon seeing item
-// Divide by 125 to get value in ms
-#define STOPWATCH		5805
-
-// Additional delays for stepper synchronization
-#define ROLLOFF_DELAY		160
-#define HALF_TURN_DELAY		100
-#define REVERSAL_DELAY		220
-#define NO_TURN_DELAY		20
-
-// Minimum period between exit interrupts, divide
-// by 125 to get get value in ms
-#define EXIT_DELAY		4000
-
+#define NO_ITEM_THRESHOLD	992	// Lowest sensor value when no item is present
+#define ALUMINIUM_MAX		255	// Highest expected value for aluminium
+#define STEEL_MAX		750	// Highest expected value for steel
+#define WHITE_MAX		900	// Highest expected value for white plastic
+#define BELT_SPEED		38	// Duty cycle %
+#define ADC_STOPWATCH		5805	// Divide by 125 to get ms
+#define NO_TURN_DELAY		20	// ms
+#define QUARTER_TURN_DELAY	10	// ms
+#define HALF_TURN_DELAY		100	// ms
+#define REVERSAL_DELAY		220	// ms
+#define EXIT_INT_DELAY		4000	// Divide by 125 to get ms
 #endif
 
 #ifdef TIMER_CALIBRATION_MODE
-
-#define NO_ITEM_TIME		5000
-#define AMBIENT_DEVIANCE	8
-
+#define NO_ITEM_TIME		5000	// Divide by 125 to get ms
+#define AMBIENT_DEVIANCE	8	// Sensor value +/- due to ambient lighting
 #endif
 
 #ifdef EXIT_CALIBRATION_MODE
-
 volatile int is_double_count = 0;
-
 #endif
 
 // ADC conversion result
@@ -67,6 +53,8 @@ volatile int ADC_result_flag = 0;
 volatile int inbound = 0;
 volatile int running = 1;
 volatile int ramp_down = 0;
+volatile int turning = 0;
+volatile int converting = 0;
 
 // Item tracking
 volatile unsigned int plastic = 0;
@@ -105,7 +93,7 @@ int main(int argc, char* argv[])
 	
 	// Minimum time between exit interrupts
 	#ifndef EXIT_CALIBRATION_MODE
-	OCR4A = EXIT_DELAY;
+	OCR4A = EXIT_INT_DELAY;
 	#else
 	OCR4A = 0xFFFF;
 	#endif
@@ -309,8 +297,11 @@ int main(int argc, char* argv[])
 		// Process item in front of reflective sensor
 		if(inbound)
 		{
-			// Reset values and start timer
+			// Update state
 			inbound = 0;
+			converting = 1;
+
+			// Reset values and start timer
 			sensor_value = 1337;
 			TCNT3 = 0x0000;
 			TIFR3 |= _BV(OCF3A);
@@ -324,20 +315,23 @@ int main(int argc, char* argv[])
 				ADC_result_flag = 0;
 				if(ADC_result < sensor_value) sensor_value = ADC_result;
 			}
+
+			// Update state
+			converting = 0;
 			
 			// Add item to queue
 			initLink(&newItem);
-			if(sensor_value < (ALUMINIUM_HIGH + STEEL_LOW)/2)
+			if(sensor_value < ALUMINIUM_MAX)
 			{
 				newItem->itemType = 'a';
 				//LCDWriteStringXY(0,1,"Alum");
 			}
-			else if(sensor_value < (STEEL_HIGH + WHITE_PLASTIC_LOW)/2)
+			else if(sensor_value < STEEL_MAX)
 			{
 				newItem->itemType = 's';
 				//LCDWriteStringXY(0,1,"Steel");
 			}
-			else if(sensor_value < (WHITE_PLASTIC_HIGH + BLACK_PLASTIC_LOW)/2)
+			else if(sensor_value < WHITE_MAX)
 			{
 				newItem->itemType = 'w';
 				//LCDWriteStringXY(0,1,"White");
@@ -769,17 +763,26 @@ ISR(INT3_vect)
 {
 	if(!ramp_down)
 	{
-		// Set ramp down timer to CTC mode at 31.25kHz
+		ramp_down = 1;
+
+		// Set 2.1s ramp down timer
 		TCCR5B |= _BV(WGM52);
 		TCCR5B |= _BV(CS52);
 		OCR5A = 0xFFFF;
-		ramp_down = 1;
+
+		// Start timer and enable its interrupt
+		TNCT5 = 0x0000;
+		TIFR5 |= _BV(OCF5A);
+		TIMSK5 |= _BV(OCIE5A);
 	}
 }
 
 // End of conveyor belt interrupt
 ISR(INT4_vect)
 {	
+	// Save conversion timer value
+	if(converting) unsigned tmp = TCNT3;
+
 	#ifndef EXIT_CALIBRATION_MODE
 	
 	// Mask this interrupt
@@ -836,7 +839,7 @@ ISR(INT4_vect)
 	}
 
 	// Move the stepper dish
-	int n = sort(firstValue(&head));
+	turning = sort(firstValue(&head));
 	num_items--;
 
 	// Remove the item from the queue
@@ -844,16 +847,22 @@ ISR(INT4_vect)
 	destroyLink(&oldItem);
 	
 	// Delay appropriately
-	if(n==0) mTimer(NO_TURN_DELAY);
-	if(n==2) mTimer(ROLLOFF_DELAY);
-	if(n==3) mTimer(REVERSAL_DELAY);
+	switch(turning)
+	{
+		case 0:
+			mTimer(NO_TURN_DELAY);
+			break;
+		case 1:
+			mTimer(QUARTER_TURN_DELAY);
+			break;
+		case 2:
+			mTimer(HALF_TURN_DELAY);
+			break;
+		case 3:
+			mTimer(REVERSAL_DELAY);
+			break;
+	}
 
-	// Resume the belt
-	PORTL &= 0x7F;
-	
-	// Allow item to roll off the belt
-	mTimer(ROLLOFF_DELAY);
-	
 	// Print info
 	LCDWriteIntXY(14,0,num_items,2);
 	
@@ -861,6 +870,17 @@ ISR(INT4_vect)
 	TCNT4 = 0x0000;
 	TIFR4 |= _BV(OCF4A);
 	TIMSK4 |= _BV(OCIE4A);
+			
+	// Resume the belt
+	PORTL &= 0x7F;
+	
+	// Resume conversion timer
+	if(converting)
+	{
+		TCNT3 = tmp;
+		TIFR3 |= _BV(OCF3A);
+	}
+
 }
 
 // First sensor trigger
