@@ -105,7 +105,7 @@ int main(int argc, char* argv[])
 	#ifdef TIMER_CALIBRATION_MODE
 	OCR3A = 0xFFFF;
 	#else
-	OCR3A = STOPWATCH;
+	OCR3A = ADC_STOPWATCH;
 	#endif
 	
 	// Enable ADC with automatic interrupts after conversion success
@@ -736,7 +736,8 @@ ISR(INT0_vect)
 ISR(INT1_vect)
 {
 	// Save conversion timer value
-	if(converting) unsigned tmp = TCNT3;
+	unsigned tmp;
+	if(converting) tmp = TCNT3;
 
 	// Debounce
 	while(PIND & 0x02) mTimer(10);
@@ -784,7 +785,7 @@ ISR(INT3_vect)
 		OCR5A = 0xFFFF;
 
 		// Start timer and enable its interrupt
-		TNCT5 = 0x0000;
+		TCNT5 = 0x0000;
 		TIFR5 |= _BV(OCF5A);
 		TIMSK5 |= _BV(OCIE5A);
 	}
@@ -794,7 +795,8 @@ ISR(INT3_vect)
 ISR(INT4_vect)
 {	
 	// Save conversion timer value
-	if(converting) unsigned tmp = TCNT3;
+	unsigned tmp;
+	if(converting) tmp = TCNT3;
 
 	#ifndef EXIT_CALIBRATION_MODE
 	
