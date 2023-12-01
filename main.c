@@ -53,8 +53,8 @@ volatile int ADC_result_flag = 0;
 volatile int inbound = 0;
 volatile int running = 1;
 volatile int ramp_down = 0;
-volatile int turning = 0;
 volatile int converting = 0;
+volatile int finishing = 0;
 
 // Item tracking
 volatile unsigned int plastic = 0;
@@ -268,7 +268,7 @@ int main(int argc, char* argv[])
 	{	
 		// If ramp-down mode is active, wait for currently enqueued items to
 		// be processed then exit
-		if(ramp_down)
+		if(finishing)
 		{
 			LCDClear();
 			LCDWriteStringXY(0,0,"Ramping down...");
@@ -321,28 +321,30 @@ int main(int argc, char* argv[])
 			
 			// Add item to queue
 			initLink(&newItem);
+			LCDClear();
 			if(sensor_value < ALUMINIUM_MAX)
 			{
 				newItem->itemType = 'a';
-				//LCDWriteStringXY(0,1,"Alum");
+				LCDWriteStringXY(0,1,"Alum");
 			}
 			else if(sensor_value < STEEL_MAX)
 			{
 				newItem->itemType = 's';
-				//LCDWriteStringXY(0,1,"Steel");
+				LCDWriteStringXY(0,1,"Steel");
 			}
 			else if(sensor_value < WHITE_MAX)
 			{
 				newItem->itemType = 'w';
-				//LCDWriteStringXY(0,1,"White");
+				LCDWriteStringXY(0,1,"White");
 			}
 			else
 			{
 				newItem->itemType = 'b';
-				//LCDWriteStringXY(0,1,"Black");
+				LCDWriteStringXY(0,1,"Black");
 			}
 			enqueue(&head,&tail,&newItem);
 			num_items++;
+			LCDWriteStringXY(0,0,"Sorting...");
 			LCDWriteIntXY(14,0,num_items,2);
 		}
 	}
@@ -608,14 +610,14 @@ void print_results(){
 
 void setup(link **h,link **t)
 {
-	*h = NULL;		/* Point the head to NOTHING (NULL) */
-	*t = NULL;		/* Point the tail to NOTHING (NULL) */
+	*h = NULL;
+	*t = NULL;
 	return;
 }
 
 void initLink(link **newLink)
 {
-	//link *l;
+	// Allocate new link
 	*newLink = malloc(sizeof(link));
 	(*newLink)->next = NULL;
 	return;
@@ -623,12 +625,7 @@ void initLink(link **newLink)
 
 void destroyLink (link **oldLink)
 {
-	if(*oldLink != NULL)
-	{
-		(*oldLink)->next = NULL;
-		free(*oldLink);
-	}
-	
+	if(*oldLink != NULL) free(*oldLink);
 	return;
 }
 
@@ -636,19 +633,17 @@ void enqueue(link **h, link **t, link **nL)
 {
 
 	if (*t != NULL){
-		/* Not an empty queue */
+		// Queue not empty
 		(*t)->next = *nL;
-		*t = *nL; //(*t)->next;
-	}/*if*/
+		*t = *nL;
+	}
 	else{
-		/* It's an empty Queue */
-		//(*h)->next = *nL;
-		//should be this
+		// Empty queue
 		*h = *nL;
 		*t = *nL;
-	}/* else */
+	}
 	
-	// Ensure queue is null terminated
+	// Should be redundant
 	(*nL)->next = NULL;
 	
 	return;
@@ -657,40 +652,50 @@ void enqueue(link **h, link **t, link **nL)
 void dequeue(link **h, link **t, link **deQueuedLink)
 {
 	*deQueuedLink = *h;
-	
-	// Special case for size 1 queue
-	if( *h == *t )
+
+	if(*deQueuedLink != NULL)
 	{
-		*t = NULL;
-	}
-	
-	/* Ensure it is not an empty queue */
-	if (*h != NULL)
-	{
+		// Queue not empty
 		*h = (*h)->next;
-	}/*if*/
+
+		if(*t == *deQueuedLink)
+		{
+			// Special case for size 1 queue
+			*t = NULL;
+		}
+		else
+		{
+			(*deQueuedLink)->next = NULL;
+		}
 	
-	(*deQueuedLink)->next = NULL;
-	
+	}
+
 	return;
 }
 
 char firstValue(link **h)
 {
-	return((*h)->itemType);
+	if(*h != NULL){
+		return((*h)->itemType);
+	}
+	else
+	{
+		return 'E';
+	}
 }
 
 void clearQueue(link **h, link **t)
 {
 	link *temp;
 
+	// Deallocate all items
 	while (*h != NULL){
 		temp = *h;
 		*h=(*h)->next;
 		free(temp);
-	}/*while*/
+	}
 	
-	/* Last but not least set the tail to NULL */
+	// Update tail
 	*t = NULL;		
 
 	return;
@@ -701,20 +706,20 @@ char isEmpty(link **h)
 	return(*h == NULL);
 }
 
-int size(link **h, link **t){
+int size(link **h, link **t)
+{
+	link *temp;
+	int size = 0;
+	temp = *h;
 
-	link 	*temp;			/* will store the link while traversing the queue */
-	int 	numItems;
-
-	numItems = 0;
-
-	temp = *h;			/* point to the first item in the list */
-
-	while(temp != NULL){
-		numItems++;
+	while(temp != NULL)
+	{
+		// Iterate until null terminator found
+		size++;
 		temp = temp->next;
-	}/*while*/	
-	return(numItems);
+	}
+
+	return(size);
 }
 
 // Killswitch ISR
@@ -730,8 +735,12 @@ ISR(INT0_vect)
 // Pause/resume conveyor belt ISR
 ISR(INT1_vect)
 {
+	// Save conversion timer value
+	if(converting) unsigned tmp = TCNT3;
+
 	// Debounce
-	while(PIND & 0x02) mTimer(20);
+	while(PIND & 0x02) mTimer(10);
+	mTimer(20);
 	
 	if( running )
 	{
@@ -744,9 +753,13 @@ ISR(INT1_vect)
 		// Resume
 		PORTL &= 0x7F;
 		running = 1;
-		LCDClear();
-		LCDWriteStringXY(0,0,"Sorting...");
-		LCDWriteIntXY(14,0,num_items,2);
+
+		// Resume conversion timer
+		if(converting)
+		{
+			TCNT3 = tmp;
+			TIFR3 |= _BV(OCF3A);
+		}
 	}
 }
 
@@ -839,7 +852,7 @@ ISR(INT4_vect)
 	}
 
 	// Move the stepper dish
-	turning = sort(firstValue(&head));
+	int turn_type = sort(firstValue(&head));
 	num_items--;
 
 	// Remove the item from the queue
@@ -847,7 +860,7 @@ ISR(INT4_vect)
 	destroyLink(&oldItem);
 	
 	// Delay appropriately
-	switch(turning)
+	switch(turn_type)
 	{
 		case 0:
 			mTimer(NO_TURN_DELAY);
@@ -906,6 +919,13 @@ ISR(TIMER4_COMPA_vect)
 	is_double_count = 0;
 	
 	#endif
+}
+
+// Ramp-down timer
+ISR(TIMER5_COMPA_vect)
+{
+	TIMSK5 &= ~_BV(OCIE5A);
+	finishing = 1;
 }
 
 // ISR for ADC Conversion Completion
