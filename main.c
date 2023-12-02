@@ -23,12 +23,12 @@
 
 #ifndef SYSTEM_PARAMETERS
 #define SYSTEM_PARMETERS
-#define NO_ITEM_THRESHOLD	992	// Lowest sensor value when no item is present
+#define NO_ITEM_THRESHOLD	984	// Lowest sensor value when no item is present
 #define ALUMINIUM_MAX		255	// Highest expected value for aluminium
 #define STEEL_MAX		750	// Highest expected value for steel
 #define WHITE_MAX		900	// Highest expected value for white plastic
 #define BELT_SPEED		38	// Duty cycle %
-#define ADC_STOPWATCH		5805	// Divide by 125 to get ms
+#define ADC_STOPWATCH		6903	// Divide by 125 to get ms
 #define NO_TURN_DELAY		20	// ms
 #define QUARTER_TURN_DELAY	10	// ms
 #define HALF_TURN_DELAY		100	// ms
@@ -76,11 +76,6 @@ int main(int argc, char* argv[])
 	link* tail;
 	link* oldItem;
 	setup(&head, &tail);
-
-	// Initialize item tracking variables
-	unsigned plastic = 0;
-	unsigned steel = 0;
-	unsigned alum = 0;
 	unsigned num_items = 0;
 		
 	// IO
@@ -136,7 +131,7 @@ int main(int argc, char* argv[])
 	
 	// Set INT0 to any edge mode (kill switch)
 	// Set INT1 to rising edge mode (pause resume)
-	EICRA |= _BV(ISC00) | _BV(ISC10);
+	EICRA |= _BV(ISC00) | _BV(ISC10) | _BV(ISC11);
 	EIMSK |= _BV(INT0) | _BV(INT1);
 	
 	// Do continuous ADC conversions and keep smallest value on screen
@@ -286,7 +281,6 @@ int main(int argc, char* argv[])
 			LCDWriteStringXY(0,0,"Ramping down...");
 			while(!isEmpty(&head));
 			LCDWriteStringXY(0,1,"complete.");
-			mTimer(1000);
 			DDRL |= 0xF0;
 			return(0);
 		}
@@ -296,6 +290,7 @@ int main(int argc, char* argv[])
 		{
 			print_results();
 			while(!running);
+			LCDClear();
 		}
 		
 		// Process item in front of reflective sensor
@@ -317,7 +312,7 @@ int main(int argc, char* argv[])
 			}
 			
 			// Keep converting if optic sensor is still outputting logic low
-			while(PINE & 0x00)
+			while(PINE & _BV(PINE5))
 			{
 				// Do a conversion; save result if less than current minimum
 				ADCSRA |= _BV(ADSC);
@@ -451,6 +446,9 @@ int main(int argc, char* argv[])
 			TCNT4 = 0x0000;
 			TIFR4 |= _BV(OCF4A);
 			TIMSK4 |= _BV(OCIE4A);
+			
+			// Update state
+			exiting = 0;
 					
 			// Resume the belt
 			PORTL &= 0x7F;
@@ -572,6 +570,17 @@ void move(int c){
 // This function moves the sorting bucket to a location based on part in list
 int sort(char item)
 {
+	if(item == 'E')
+	{
+		// Error
+		LCDClear();
+		LCDWriteStringXY(5,0,"ERROR:");
+		LCDWriteStringXY(2,1,"Double Count");
+		mTimer(2000);
+	}
+	
+	items_sorted++;
+	
 	int recent_disk_direction = disk_direction;
 	switch(disk_location)
 	{
@@ -677,7 +686,7 @@ int sort(char item)
 void print_results(){
 	LCDClear();
 	LCDWriteStringXY(0,0, "Items Sorted: ");
-	LCDWriteIntXY(13,0,items_sorted,2);
+	LCDWriteIntXY(14,0,items_sorted,2);
 	LCDWriteStringXY(0,1, "S:");
 	LCDWriteIntXY(2,1,steel,2);
 	LCDWriteStringXY(4,1, ", A:");
@@ -709,7 +718,6 @@ void destroyLink (link **oldLink)
 
 void enqueue(link **h, link **t, link **nL)
 {
-
 	if (*t != NULL){
 		// Queue not empty
 		(*t)->next = *nL;
@@ -739,7 +747,7 @@ void dequeue(link **h, link **t, link **deQueuedLink)
 		if(*t == *deQueuedLink)
 		{
 			// Special case for size 1 queue
-			*t = NULL;
+			*t = *h;
 		}
 		else
 		{
@@ -813,10 +821,6 @@ ISR(INT0_vect)
 // Pause/resume conveyor belt ISR
 ISR(INT1_vect)
 {
-	// Debounce
-	mTimer(20);
-	while(PIND & 0x02) mTimer(10);
-	
 	if( running )
 	{
 		// Pause
@@ -829,6 +833,10 @@ ISR(INT1_vect)
 		PORTL &= 0x7F;
 		running = 1;
 	}
+	
+	// Debounce
+	mTimer(20);
+	EIFR |= _BV(INTF1);
 }
 
 // Stepper homing interrupt
@@ -851,6 +859,10 @@ ISR(INT3_vect)
 		TIFR5 |= _BV(OCF5A);
 		TIMSK5 |= _BV(OCIE5A);
 	}
+	
+	// Debounce
+	mTimer(20);
+	EIFR |= _BV(INTF3);
 }
 
 // End of conveyor belt interrupt
