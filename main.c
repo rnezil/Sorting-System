@@ -56,6 +56,11 @@ volatile int ramp_down = 0;
 volatile int finishing = 0;
 volatile int exiting = 0;
 
+// Tracks number of items sorted
+volatile unsigned int plastic = 0;
+volatile unsigned int steel = 0;
+volatile unsigned int alum = 0;
+
 // Millisecond timer
 void mTimer(int count);
 
@@ -289,15 +294,7 @@ int main(int argc, char* argv[])
 		// If paused, print sorting info
 		if(!running)
 		{
-			LCDClear();
-			LCDWriteStringXY(0,1, "S:");
-			LCDWriteIntXY(2,1,steel,2);
-			LCDWriteStringXY(4,1, ", A:");
-			LCDWriteIntXY(8,1,alum,2);
-			LCDWriteStringXY(10,1, ", P:");
-			LCDWriteIntXY(14,1,plastic,2);
-			LCDWriteStringXY(0,0, "Items Sorted:");
-			LCDWriteIntXY(14,0,items_sorted,2);
+			print_results();
 			while(!running);
 		}
 		
@@ -320,7 +317,7 @@ int main(int argc, char* argv[])
 			}
 			
 			// Keep converting if optic sensor is still outputting logic low
-			while(PINE & 0x)
+			while(PINE & 0x00)
 			{
 				// Do a conversion; save result if less than current minimum
 				ADCSRA |= _BV(ADSC);
@@ -496,15 +493,7 @@ void home(){
 	while (!homed_flag){
 		if(!running)
 		{
-			LCDClear();
-			LCDWriteStringXY(0,1, "S:");
-			LCDWriteIntXY(2,1,steel,2);
-			LCDWriteStringXY(4,1, ", A:");
-			LCDWriteIntXY(8,1,alum,2);
-			LCDWriteStringXY(10,1, ", P:");
-			LCDWriteIntXY(14,1,plastic,2);
-			LCDWriteStringXY(0,1, "Items Sorted:");
-			LCDWriteIntXY(14,0,items_sorted,2);
+			print_results();
 			while(!running);
 		}
 		
@@ -526,15 +515,7 @@ void move(int c){
 		while(c > 0){
 			if(!running)
 			{
-				LCDClear();
-				LCDWriteStringXY(0,1, "S:");
-				LCDWriteIntXY(2,1,steel,2);
-				LCDWriteStringXY(4,1, ", A:");
-				LCDWriteIntXY(8,1,alum,2);
-				LCDWriteStringXY(10,1, ", P:");
-				LCDWriteIntXY(14,1,plastic,2);
-				LCDWriteStringXY(0,1, "Items Sorted:");
-				LCDWriteIntXY(14,0,items_sorted,2);
+				print_results();
 				while(!running);
 			}
 			
@@ -562,15 +543,7 @@ void move(int c){
 		while (c > 0){
 			if(!running)
 			{
-				LCDClear();
-				LCDWriteStringXY(0,1, "S:");
-				LCDWriteIntXY(2,1,steel,2);
-				LCDWriteStringXY(4,1, ", A:");
-				LCDWriteIntXY(8,1,alum,2);
-				LCDWriteStringXY(10,1, ", P:");
-				LCDWriteIntXY(14,1,plastic,2);
-				LCDWriteStringXY(0,1, "Items Sorted:");
-				LCDWriteIntXY(14,0,items_sorted,2);
+				print_results();
 				while(!running);
 			}
 			
@@ -702,26 +675,15 @@ int sort(char item)
 
 // Function to test sorting of a list
 void print_results(){
-	if (disk_location == 'b'){
-		LCDWriteStringXY(0, 0, "Disk on Black" );
-		LCDWriteStringXY(0, 1, "Items Sorted: ");
-		LCDWriteIntXY(14,1, items_sorted, 2);
-	}
-	else if (disk_location == 'w'){
-		LCDWriteStringXY(0, 0, "Disk on White" );
-		LCDWriteStringXY(0, 1, "Items Sorted: ");
-		LCDWriteIntXY(14,1, items_sorted, 2);
-	}
-	else if (disk_location == 's'){
-		LCDWriteStringXY(0, 0, "Disk on Steel" );
-		LCDWriteStringXY(0, 1, "Items Sorted: ");
-		LCDWriteIntXY(14,1, items_sorted, 2);
-	}
-	else if (disk_location == 'a'){
-		LCDWriteStringXY(0, 0, "Disk on Aluminum" );
-		LCDWriteStringXY(0, 1, "Items Sorted: ");
-		LCDWriteIntXY(14,1, items_sorted, 2);
-	}
+	LCDClear();
+	LCDWriteStringXY(0,0, "Items Sorted: ");
+	LCDWriteIntXY(13,0,items_sorted,2);
+	LCDWriteStringXY(0,1, "S:");
+	LCDWriteIntXY(2,1,steel,2);
+	LCDWriteStringXY(4,1, ", A:");
+	LCDWriteIntXY(8,1,alum,2);
+	LCDWriteStringXY(10,1, ", P:");
+	LCDWriteIntXY(14,1,plastic,2);
 }
 
 void setup(link **h,link **t)
@@ -852,7 +814,7 @@ ISR(INT0_vect)
 ISR(INT1_vect)
 {
 	// Debounce
-	mTimer(20)
+	mTimer(20);
 	while(PIND & 0x02) mTimer(10);
 	
 	if( running )
