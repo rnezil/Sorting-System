@@ -12,7 +12,7 @@
 //#define PRECALIBRATION_MODE
 //#define TIMER_CALIBRATION_MODE
 //#define EXIT_CALIBRATION_MODE
-//#define CALIBRATION_MODE
+#define CALIBRATION_MODE
 
 #ifdef TIMER_CALIBRATION_MODE
 
@@ -40,7 +40,7 @@ volatile int is_double_count = 0;
 #ifndef SENSOR_VALUES
 #define SENSOR_VALUES
 
-#define NO_ITEM_THRESHOLD	1006
+#define NO_ITEM_THRESHOLD	993
 
 #define ALUMINIUM_LOW		24
 #define ALUMINIUM_HIGH		31
