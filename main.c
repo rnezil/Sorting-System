@@ -29,6 +29,7 @@
 #define WHITE_MAX		900	// Highest expected value for white plastic
 #define BELT_SPEED		38	// Duty cycle %
 #define ADC_STOPWATCH		6903	// Divide by 125 to get ms
+#define ROLLOFF_DELAY		250
 #define NO_TURN_DELAY		20	// ms
 #define QUARTER_TURN_DELAY	10	// ms
 #define HALF_TURN_DELAY		100	// ms
@@ -111,9 +112,14 @@ int main(int argc, char* argv[])
 	#endif
 
 	// 1MHz millisecond timer counter
-	TCCR1B |= _BV(CS11);
+	TCCR2A |= _BV(WGM21);
+	TCCR2B |= _BV(CS21) | _BV(CS20);
+	OCR2A = 250;
+	
+	// Auxiliary conversion timer
+	TCCR1B |= _BV(CS11) | _BV(CS10);
 	TCCR1B |= _BV(WGM12);
-	OCR1A = 0x03E8;
+	OCR1A = ROLLOFF_DELAY*125;
 	
 	// 3.9kHz PWM
 	TCCR0A |= _BV(WGM01) | _BV(WGM00);
@@ -462,6 +468,79 @@ int main(int argc, char* argv[])
 					
 			// Resume the belt
 			PORTL &= 0x7F;
+			
+			// Ensure new conversions still carried out while
+			// item rolls of belt
+			TCNT1 = 0x0000;
+			TIFR1 |= _BV(OCF1A);
+			while(!(TIFR1 & _BV(OCF1A)))
+			{
+				if(inbound)
+				{
+					// Reset values and start timer
+					sensor_value = 1337;
+					TCNT3 = 0x0000;
+					TIFR3 |= _BV(OCF3A);
+					
+					// Determine item value
+					while(!(TIFR3 & _BV(OCF3A)))
+					{
+						// Do a conversion; save result if less than current minimum
+						ADCSRA |= _BV(ADSC);
+						while(!ADC_result_flag);
+						ADC_result_flag = 0;
+						if(ADC_result < sensor_value) sensor_value = ADC_result;
+					}
+					
+					// Keep converting if optic sensor is still outputting logic low
+					while(PINE & _BV(PINE5))
+					{
+						// Do a conversion; save result if less than current minimum
+						ADCSRA |= _BV(ADSC);
+						while(!ADC_result_flag);
+						ADC_result_flag = 0;
+						if(ADC_result < sensor_value) sensor_value = ADC_result;
+					}
+					
+					// Add item to queue
+					initLink(&newItem);
+					LCDClear();
+					if(sensor_value < ALUMINIUM_MAX)
+					{
+						newItem->itemType = 'a';
+						//LCDWriteStringXY(0,1,"Alum");
+					}
+					else if(sensor_value < STEEL_MAX)
+					{
+						newItem->itemType = 's';
+						//LCDWriteStringXY(0,1,"Steel");
+					}
+					else if(sensor_value < WHITE_MAX)
+					{
+						newItem->itemType = 'w';
+						//LCDWriteStringXY(0,1,"White");
+					}
+					else
+					{
+						newItem->itemType = 'b';
+						//LCDWriteStringXY(0,1,"Black");
+					}
+					enqueue(&head,&tail,&newItem);
+					num_items++;
+					if(ramp_down)
+					{
+						LCDWriteStringXY(0,0,"Ramping down...");
+					}
+					else
+					{
+						LCDWriteStringXY(0,0,"Sorting...");
+						LCDWriteIntXY(14,0,num_items,2);
+					}
+
+					// Update state
+					inbound = 0;
+				}
+			}
 		}
 	}
 	
@@ -473,15 +552,15 @@ void mTimer(int count)
 {
 	// Set timer to CTC mode at 1MHz with TOP = 1000
 	int i = 0;
-	TCNT1 = 0x0000;
-	TIFR1 |= _BV(OCF1A);
+	TCNT2 = 0x00;
+	TIFR2 |= _BV(OCF2A);
 
 	// Count to 1000 at 1MHz 'count' times
 	while(i < count)
 	{
-		if(TIFR1 & 0x02)
+		if(TIFR2 & _BV(OCF2A))
 		{
-			TIFR1 |= _BV(OCF1A);
+			TIFR2 |= _BV(OCF2A);
 			i++;
 		}
 	}
