@@ -87,9 +87,9 @@ int main(int argc, char* argv[])
 	DDRK = 0xFF;
 	DDRF = 0xC0;
 	
-	// 2.1s ramp down countdown timer
+	// 8.4s ramp down countdown timer
 	TCCR5B |= _BV(WGM52);
-	TCCR5B |= _BV(CS52);
+	TCCR5B |= _BV(CS52) | _BV(CS50);
 	OCR5A = 0xFFFF;
 	
 	// Set exit timer to CTC mode, 125kHz
@@ -278,11 +278,12 @@ int main(int argc, char* argv[])
 		if(finishing)
 		{
 			LCDClear();
-			LCDWriteStringXY(0,0,"Ramping down...");
-			while(!isEmpty(&head));
-			LCDWriteStringXY(0,1,"complete.");
-			DDRL |= 0xF0;
-			return(0);
+			if(isEmpty(&head)){
+				LCDWriteStringXY(0,0,"Ramping down...");
+				LCDWriteStringXY(0,1,"complete.");
+				PORTL |= 0xF0;
+				while(1);
+			}
 		}
 		
 		// If paused, print sorting info
@@ -327,27 +328,34 @@ int main(int argc, char* argv[])
 			if(sensor_value < ALUMINIUM_MAX)
 			{
 				newItem->itemType = 'a';
-				LCDWriteStringXY(0,1,"Alum");
+				//LCDWriteStringXY(0,1,"Alum");
 			}
 			else if(sensor_value < STEEL_MAX)
 			{
 				newItem->itemType = 's';
-				LCDWriteStringXY(0,1,"Steel");
+				//LCDWriteStringXY(0,1,"Steel");
 			}
 			else if(sensor_value < WHITE_MAX)
 			{
 				newItem->itemType = 'w';
-				LCDWriteStringXY(0,1,"White");
+				//LCDWriteStringXY(0,1,"White");
 			}
 			else
 			{
 				newItem->itemType = 'b';
-				LCDWriteStringXY(0,1,"Black");
+				//LCDWriteStringXY(0,1,"Black");
 			}
 			enqueue(&head,&tail,&newItem);
 			num_items++;
-			LCDWriteStringXY(0,0,"Sorting...");
-			LCDWriteIntXY(14,0,num_items,2);
+			if(ramp_down)
+			{
+				LCDWriteStringXY(0,0,"Ramping down...");
+			}
+			else
+			{
+				LCDWriteStringXY(0,0,"Sorting...");
+				LCDWriteIntXY(14,0,num_items,2);
+			}
 
 			// Update state
 			inbound = 0;
@@ -390,7 +398,7 @@ int main(int argc, char* argv[])
 			// Stop the belt
 			PORTL |= 0xF0;
 			
-				// Print info
+			// Print info
 			switch(firstValue(&head))
 			{
 				case 'a':
@@ -440,7 +448,7 @@ int main(int argc, char* argv[])
 			}
 	
 			// Print info
-			LCDWriteIntXY(14,0,num_items,2);
+			if(!ramp_down) LCDWriteIntXY(14,0,num_items,2);
 			
 			// Start the exit timer and enable its interrupt
 			TCNT4 = 0x0000;
@@ -452,13 +460,6 @@ int main(int argc, char* argv[])
 					
 			// Resume the belt
 			PORTL &= 0x7F;
-			
-			// Resume conversion timer
-			//if(converting)
-			//{
-			//	TCNT3 = tmp;
-			//	TIFR3 |= _BV(OCF3A);
-			//}
 		}
 	}
 	
@@ -755,6 +756,12 @@ void dequeue(link **h, link **t, link **deQueuedLink)
 		}
 	
 	}
+	else
+	{
+		// Empty list
+		*h = NULL;
+		*t = NULL;
+	}
 
 	return;
 }
@@ -852,6 +859,7 @@ ISR(INT3_vect)
 {
 	if(!ramp_down)
 	{
+		LCDWriteStringXY(0,0,"Ramping down...");
 		ramp_down = 1;
 
 		// Start timer and enable its interrupt
