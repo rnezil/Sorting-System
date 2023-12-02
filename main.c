@@ -53,17 +53,8 @@ volatile int ADC_result_flag = 0;
 volatile int inbound = 0;
 volatile int running = 1;
 volatile int ramp_down = 0;
-volatile int converting = 0;
 volatile int finishing = 0;
-
-// Item tracking
-volatile unsigned int plastic = 0;
-volatile unsigned int steel = 0;
-volatile unsigned int alum = 0;
-volatile int num_items = 0;
-volatile link* head;
-volatile link* tail;
-volatile link* oldItem;
+volatile int exiting = 0;
 
 // Millisecond timer
 void mTimer(int count);
@@ -76,7 +67,16 @@ int main(int argc, char* argv[])
 	InitLCD(LS_BLINK|LS_ULINE);
 	LCDClear();
 	link* newItem;
+	link* head;
+	link* tail;
+	link* oldItem;
 	setup(&head, &tail);
+
+	// Initialize item tracking variables
+	unsigned plastic = 0;
+	unsigned steel = 0;
+	unsigned alum = 0;
+	unsigned num_items = 0;
 		
 	// IO
 	DDRB = 0x80;
@@ -87,11 +87,14 @@ int main(int argc, char* argv[])
 	DDRK = 0xFF;
 	DDRF = 0xC0;
 	
+	// 2.1s ramp down countdown timer
+	TCCR5B |= _BV(WGM52);
+	TCCR5B |= _BV(CS52);
+	OCR5A = 0xFFFF;
+	
 	// Set exit timer to CTC mode, 125kHz
 	TCCR4B |= _BV(WGM42);
 	TCCR4B |= _BV(CS41) | _BV(CS40);
-	
-	// Minimum time between exit interrupts
 	#ifndef EXIT_CALIBRATION_MODE
 	OCR4A = EXIT_INT_DELAY;
 	#else
@@ -101,23 +104,27 @@ int main(int argc, char* argv[])
 	// Set ADC conversion timer to CTC mode, 125kHz
 	TCCR3B |= _BV(WGM32);
 	TCCR3B |= _BV(CS31) | _BV(CS30);
-	TCCR1B |= _BV(CS11);
 	#ifdef TIMER_CALIBRATION_MODE
 	OCR3A = 0xFFFF;
 	#else
 	OCR3A = ADC_STOPWATCH;
 	#endif
-	
-	// Enable ADC with automatic interrupts after conversion success
-	ADCSRA |= _BV(ADEN);
-	ADCSRA |= _BV(ADIE);
-	ADMUX |=_BV(REFS0);
+
+	// 1MHz millisecond timer counter
+	TCCR1B |= _BV(CS11);
+	TCCR1B |= _BV(WGM12);
+	OCR1A = 0x03E8;
 	
 	// 3.9kHz PWM
 	TCCR0A |= _BV(WGM01) | _BV(WGM00);
 	OCR0A = BELT_SPEED * 255 / 100;
 	TCCR0A |= _BV(COM0A1);
 	TCCR0B |= _BV(CS01);
+
+	// Enable ADC with automatic interrupts after conversion success
+	ADCSRA |= _BV(ADEN);
+	ADCSRA |= _BV(ADIE);
+	ADMUX |=_BV(REFS0);
 	
 	// Enter uninterruptable command sequence
 	cli();
@@ -297,10 +304,6 @@ int main(int argc, char* argv[])
 		// Process item in front of reflective sensor
 		if(inbound)
 		{
-			// Update state
-			inbound = 0;
-			converting = 1;
-
 			// Reset values and start timer
 			sensor_value = 1337;
 			TCNT3 = 0x0000;
@@ -315,9 +318,16 @@ int main(int argc, char* argv[])
 				ADC_result_flag = 0;
 				if(ADC_result < sensor_value) sensor_value = ADC_result;
 			}
-
-			// Update state
-			converting = 0;
+			
+			// Keep converting if optic sensor is still outputting logic low
+			while(PINE & 0x)
+			{
+				// Do a conversion; save result if less than current minimum
+				ADCSRA |= _BV(ADSC);
+				while(!ADC_result_flag);
+				ADC_result_flag = 0;
+				if(ADC_result < sensor_value) sensor_value = ADC_result;
+			}
 			
 			// Add item to queue
 			initLink(&newItem);
@@ -346,6 +356,114 @@ int main(int argc, char* argv[])
 			num_items++;
 			LCDWriteStringXY(0,0,"Sorting...");
 			LCDWriteIntXY(14,0,num_items,2);
+
+			// Update state
+			inbound = 0;
+		}
+
+		if(exiting)
+		{
+			// Save conversion timer value
+			//unsigned tmp;
+			//if(inbound) tmp = TCNT3;
+		
+			#ifndef EXIT_CALIBRATION_MODE
+			
+			// Mask this interrupt
+			EIMSK &= ~_BV(INT4);
+			
+			#else
+			
+			// Capture timer value
+			unsigned double_count_time = TCNT4;
+			
+			// If double-count, print time between counts
+			if(is_double_count)
+			{
+				LCDClear();
+				LCDWriteStringXY(1,0,"DOUBLE TROUBLE");
+				LCDWriteIntXY(5,1,double_count_time,5);
+				mTimer(2000);
+			}
+			else
+			{
+				LCDClear();
+				LCDWriteStringXY(0,0,"Sorting...");
+				LCDWriteIntXY(14,0,num_items,2);
+				is_double_count = 1;
+			}
+			
+			#endif
+			
+			// Stop the belt
+			PORTL |= 0xF0;
+			
+				// Print info
+			switch(firstValue(&head))
+			{
+				case 'a':
+				LCDWriteStringXY(0,1,"Aluminium       ");
+				alum++;
+				break;
+				
+				case 's':
+				LCDWriteStringXY(0,1,"Steel           ");
+				steel++;
+				break;
+				
+				case 'b':
+				LCDWriteStringXY(0,1,"Black Plastic   ");
+				plastic++;
+				break;
+				
+				case 'w':
+				LCDWriteStringXY(0,1,"White Plastic   ");
+				plastic++;
+				break;
+			}
+		
+			// Move the stepper dish
+			int turn_type = sort(firstValue(&head));
+			num_items--;
+		
+			// Remove the item from the queue
+			dequeue(&head, &tail, &oldItem);
+			destroyLink(&oldItem);
+			
+			// Delay appropriately
+			switch(turn_type)
+			{
+				case 0:
+					mTimer(NO_TURN_DELAY);
+					break;
+				case 1:
+					mTimer(QUARTER_TURN_DELAY);
+					break;
+				case 2:
+					mTimer(HALF_TURN_DELAY);
+					break;
+				case 3:
+					mTimer(REVERSAL_DELAY);
+					break;
+			}
+	
+			// Print info
+			LCDWriteIntXY(14,0,num_items,2);
+			
+			// Start the exit timer and enable its interrupt
+			TCNT4 = 0x0000;
+			TIFR4 |= _BV(OCF4A);
+			TIMSK4 |= _BV(OCIE4A);
+					
+			// Resume the belt
+			PORTL &= 0x7F;
+			
+			// Resume conversion timer
+			//if(converting)
+			//{
+			//	TCNT3 = tmp;
+			//	TIFR3 |= _BV(OCF3A);
+			//}
 		}
 	}
 	
@@ -357,8 +475,6 @@ void mTimer(int count)
 {
 	// Set timer to CTC mode at 1MHz with TOP = 1000
 	int i = 0;
-	TCCR1B |= _BV(WGM12);
-	OCR1A = 0x03E8;
 	TCNT1 = 0x0000;
 	TIFR1 |= _BV(OCF1A);
 
@@ -735,13 +851,9 @@ ISR(INT0_vect)
 // Pause/resume conveyor belt ISR
 ISR(INT1_vect)
 {
-	// Save conversion timer value
-	unsigned tmp;
-	if(converting) tmp = TCNT3;
-
 	// Debounce
+	mTimer(20)
 	while(PIND & 0x02) mTimer(10);
-	mTimer(20);
 	
 	if( running )
 	{
@@ -754,13 +866,6 @@ ISR(INT1_vect)
 		// Resume
 		PORTL &= 0x7F;
 		running = 1;
-
-		// Resume conversion timer
-		if(converting)
-		{
-			TCNT3 = tmp;
-			TIFR3 |= _BV(OCF3A);
-		}
 	}
 }
 
@@ -779,11 +884,6 @@ ISR(INT3_vect)
 	{
 		ramp_down = 1;
 
-		// Set 2.1s ramp down timer
-		TCCR5B |= _BV(WGM52);
-		TCCR5B |= _BV(CS52);
-		OCR5A = 0xFFFF;
-
 		// Start timer and enable its interrupt
 		TCNT5 = 0x0000;
 		TIFR5 |= _BV(OCF5A);
@@ -794,108 +894,7 @@ ISR(INT3_vect)
 // End of conveyor belt interrupt
 ISR(INT4_vect)
 {	
-	// Save conversion timer value
-	unsigned tmp;
-	if(converting) tmp = TCNT3;
-
-	#ifndef EXIT_CALIBRATION_MODE
-	
-	// Mask this interrupt
-	EIMSK &= ~_BV(INT4);
-	
-	#else
-	
-	// Capture timer value
-	unsigned double_count_time = TCNT4;
-	
-	// If double-count, print time between counts
-	if(is_double_count)
-	{
-		LCDClear();
-		LCDWriteStringXY(1,0,"DOUBLE TROUBLE");
-		LCDWriteIntXY(5,1,double_count_time,5);
-		mTimer(2000);
-	}
-	else
-	{
-		LCDClear();
-		LCDWriteStringXY(0,0,"Sorting...");
-		LCDWriteIntXY(14,0,num_items,2);
-		is_double_count = 1;
-	}
-	
-	#endif
-	
-	// Stop the belt
-	PORTL |= 0xF0;
-	
-	// Print info
-	switch(firstValue(&head))
-	{
-		case 'a':
-		LCDWriteStringXY(0,1,"Aluminium       ");
-		alum++;
-		break;
-		
-		case 's':
-		LCDWriteStringXY(0,1,"Steel           ");
-		steel++;
-		break;
-		
-		case 'b':
-		LCDWriteStringXY(0,1,"Black Plastic   ");
-		plastic++;
-		break;
-		
-		case 'w':
-		LCDWriteStringXY(0,1,"White Plastic   ");
-		plastic++;
-		break;
-	}
-
-	// Move the stepper dish
-	int turn_type = sort(firstValue(&head));
-	num_items--;
-
-	// Remove the item from the queue
-	dequeue(&head, &tail, &oldItem);
-	destroyLink(&oldItem);
-	
-	// Delay appropriately
-	switch(turn_type)
-	{
-		case 0:
-			mTimer(NO_TURN_DELAY);
-			break;
-		case 1:
-			mTimer(QUARTER_TURN_DELAY);
-			break;
-		case 2:
-			mTimer(HALF_TURN_DELAY);
-			break;
-		case 3:
-			mTimer(REVERSAL_DELAY);
-			break;
-	}
-
-	// Print info
-	LCDWriteIntXY(14,0,num_items,2);
-	
-	// Start the exit timer and enable its interrupt
-	TCNT4 = 0x0000;
-	TIFR4 |= _BV(OCF4A);
-	TIMSK4 |= _BV(OCIE4A);
-			
-	// Resume the belt
-	PORTL &= 0x7F;
-	
-	// Resume conversion timer
-	if(converting)
-	{
-		TCNT3 = tmp;
-		TIFR3 |= _BV(OCF3A);
-	}
-
+	exiting = 1;
 }
 
 // First sensor trigger
