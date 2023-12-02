@@ -282,6 +282,8 @@ int main(int argc, char* argv[])
 				LCDWriteStringXY(0,0,"Ramping down...");
 				LCDWriteStringXY(0,1,"complete.");
 				PORTL |= 0xF0;
+				mTimer(2000);
+				print_results();
 				while(1);
 			}
 		}
