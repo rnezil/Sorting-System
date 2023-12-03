@@ -30,8 +30,8 @@
 #define BELT_SPEED		38	// Duty cycle %
 #define ADC_STOPWATCH		6903	// Divide by 125 to get ms
 #define NO_TURN_DELAY		20	// ms
-#define QUARTER_TURN_DELAY	10	// ms
-#define HALF_TURN_DELAY		100	// ms
+#define QUARTER_TURN_DELAY	20	// ms
+#define HALF_TURN_DELAY		70	// ms
 #define REVERSAL_DELAY		220	// ms
 #define EXIT_INT_DELAY		4000	// Divide by 125 to get ms
 #endif
